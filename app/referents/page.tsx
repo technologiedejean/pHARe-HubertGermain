@@ -16,6 +16,7 @@ type Referent = {
   couleur: string;
   actif: boolean;
   must_change_password: boolean;
+  role: "admin" | "referent";
 };
 type Profile = { role: "admin" | "referent"; id: string };
 
@@ -197,7 +198,9 @@ function ModalReferent({
             <p className="font-semibold text-[#1B1633]">
               {form.prenom || "Prénom"} {form.nom || "Nom"}
             </p>
-            <p className="text-sm text-[#9A97AD]">Référent</p>
+            <p className="text-sm text-[#9A97AD]">
+              {referent?.role === "admin" ? "Administrateur ⚙" : "Référent"}
+            </p>
           </div>
         </div>
 
@@ -378,6 +381,7 @@ function CarteReferent({
   onToggleActif: () => void;
   onDelete: () => void;
 }) {
+  const estAdmin = referent.role === "admin";
   return (
     <div className={`rounded-2xl border bg-white p-4 shadow-sm transition ${
       referent.actif ? "border-[#EEEDF5]" : "border-[#E7E6EF] opacity-60"
@@ -390,6 +394,11 @@ function CarteReferent({
               {referent.prenom} {referent.nom}
               {isSelf && <span className="ml-1.5 text-xs text-[#6656B8] font-normal">(vous)</span>}
             </p>
+            {estAdmin && (
+              <span className="rounded-full bg-[#1A1440] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                ⚙ Admin
+              </span>
+            )}
             {!referent.actif && (
               <span className="rounded-full bg-[#F3F2FA] px-2 py-0.5 text-xs text-[#9A97AD]">
                 Désactivé
@@ -407,26 +416,34 @@ function CarteReferent({
           style={{ backgroundColor: referent.couleur }} title="Couleur agenda" />
       </div>
 
-      {isAdmin && !isSelf && (
+      {isAdmin && (
         <div className="mt-3 flex gap-2 border-t border-[#F3F2FA] pt-3">
+          {/* L'admin peut modifier tous les comptes, y compris le sien */}
           <button onClick={onEdit}
             className="flex-1 rounded-xl border border-[#E7E6EF] bg-white px-3 py-2 text-xs
                        font-medium text-[#3A3556] hover:bg-[#F3F2FA] transition">
             ✏️ Modifier
           </button>
-          <button onClick={onToggleActif}
-            className={`flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition ${
-              referent.actif
-                ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-            }`}>
-            {referent.actif ? "⏸ Désactiver" : "▶ Réactiver"}
-          </button>
-          <button onClick={onDelete}
-            className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs
-                       font-medium text-red-600 hover:bg-red-100 transition">
-            🗑️
-          </button>
+
+          {/* Désactivation / suppression interdites sur soi-même ET sur un compte admin
+              (pour éviter tout verrouillage du compte administrateur) */}
+          {!isSelf && !estAdmin && (
+            <>
+              <button onClick={onToggleActif}
+                className={`flex-1 rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                  referent.actif
+                    ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                }`}>
+                {referent.actif ? "⏸ Désactiver" : "▶ Réactiver"}
+              </button>
+              <button onClick={onDelete}
+                className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs
+                           font-medium text-red-600 hover:bg-red-100 transition">
+                🗑️
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -451,8 +468,10 @@ export default function ReferentsPage() {
   const loadReferents = useCallback(async () => {
     const { data } = await supabase
       .from("profiles")
-      .select("id, nom, prenom, email, couleur, actif, must_change_password")
-      .eq("role", "referent")
+      .select("id, nom, prenom, email, couleur, actif, must_change_password, role")
+      .in("role", ["admin", "referent"])
+      // Admin d'abord, puis les référents par ordre alphabétique
+      .order("role", { ascending: true })
       .order("nom", { ascending: true });
     if (data) setReferents(data);
   }, []);
