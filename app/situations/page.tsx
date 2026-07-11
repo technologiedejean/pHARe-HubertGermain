@@ -363,7 +363,25 @@ function ModalCreerSituation({
     if (!titre.trim()) { setError("Le titre de la situation est obligatoire."); return; }
     setLoading(true); setError(null);
 
-    // 1. Créer la situation
+    // On relit l'identité de la session ACTIVE au moment précis de la
+    // validation (plutôt que de se fier à la valeur "profileId" reçue
+    // à l'ouverture de la modale, qui pourrait être obsolète si la page
+    // est restée ouverte longtemps). C'est cette valeur fraîche qui
+    // détermine à qui la situation est attribuée : toujours le référent
+    // réellement connecté au moment où il valide la création.
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    const auteurId = authData?.user?.id ?? profileId;
+
+    if (authErr || !authData?.user) {
+      setError(
+        "Impossible de confirmer votre identité de connexion. " +
+        "Reconnectez-vous puis réessayez."
+      );
+      setLoading(false);
+      return;
+    }
+
+    // 1. Créer la situation — toujours attribuée au référent connecté
     const { data: sit, error: sitErr } = await supabase
       .from("situations")
       .insert({
@@ -372,7 +390,7 @@ function ModalCreerSituation({
         date_signalement: dateSignalement || null,
         gravite:          gravite || null,
         statut:           "ouverte",
-        cree_par:         profileId,
+        cree_par:         auteurId,
       })
       .select("id")
       .single();
@@ -403,12 +421,12 @@ function ModalCreerSituation({
       if (acteursErr) { setError(acteursErr.message); setLoading(false); return; }
     }
 
-    // 3. Donner le droit "modification" au créateur
+    // 3. Donner le droit "modification" au créateur (même référent connecté)
     await supabase.from("referent_situation_droits").insert({
       situation_id: sit.id,
-      referent_id:  profileId,
+      referent_id:  auteurId,
       niveau:       "modification",
-      accorde_par:  profileId,
+      accorde_par:  auteurId,
     });
 
     setLoading(false); onSuccess(); onClose();
