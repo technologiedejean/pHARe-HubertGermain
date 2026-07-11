@@ -14,3 +14,20 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     storageKey:         "phare-auth",
   },
 });
+
+// Les navigateurs limitent les minuteurs des onglets inactifs ou en
+// arrière-plan, ce qui peut empêcher le rafraîchissement automatique du
+// jeton de session de se déclencher à temps (le jeton expire alors
+// silencieusement pendant que l'onglet est resté ouvert sans interaction).
+// On force donc un rafraîchissement explicite dès que l'onglet redevient
+// visible, comme recommandé par la documentation Supabase pour les
+// applications 100 % côté client.
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      supabase.auth.startAutoRefresh();
+    } else {
+      supabase.auth.stopAutoRefresh();
+    }
+  });
+}
