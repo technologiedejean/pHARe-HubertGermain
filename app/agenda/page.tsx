@@ -468,6 +468,20 @@ function ModalCreneau({
     }
     setLoading(true); setError(null);
 
+    // Le créateur (referent_id) doit TOUJOURS être la personne réellement
+    // connectée — jamais la personne choisie dans "Référent en charge".
+    // On relit l'identité en direct pour éviter toute valeur obsolète.
+    let createurId = profile.id;
+    if (!isEdit) {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr || !authData?.user) {
+        setError("Impossible de confirmer votre identité de connexion. Reconnectez-vous puis réessayez.");
+        setLoading(false);
+        return;
+      }
+      createurId = authData.user.id;
+    }
+
     const payload = {
       date_creneau:       form.date_creneau || null,
       heure_debut:        form.heure_debut,
@@ -477,7 +491,11 @@ function ModalCreneau({
       eleve_id:           form.eleve_id      || null,
       note:               form.note          || null,
       titre:              hasSituation ? null : (form.titre.trim() || null),
-      referent_id:        creneau ? creneau.referent_id : (form.referent_charge_id || profile.id),
+      // En modification, on conserve le créateur d'origine du créneau.
+      // En création, c'est toujours la personne connectée — le champ
+      // "Référent en charge" (form.referent_charge_id) ne détermine que
+      // qui est ASSIGNÉ, jamais qui est le créateur.
+      referent_id:        creneau ? creneau.referent_id : createurId,
       referent_charge_id: form.referent_charge_id || null,
     };
 
