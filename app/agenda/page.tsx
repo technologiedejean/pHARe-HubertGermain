@@ -678,8 +678,8 @@ function ModalNouvelleTache({
     const hasSituation = !!form.situation_id;
     const { error: err } = await supabase.from("creneaux").insert({
       date_creneau:       null,
-      heure_debut:        "00:00",
-      heure_fin:          "00:00",
+      heure_debut:        "09:00",
+      heure_fin:          "10:00",
       statut:             "prevu",
       situation_id:       form.situation_id || null,
       titre:              hasSituation ? null : (form.titre.trim() || null),
