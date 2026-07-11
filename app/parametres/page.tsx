@@ -17,10 +17,10 @@ const ELEMENTS = [
   {
     id:          "situations",
     label:       "Situations",
-    description: "Toutes les fiches situations, les rôles des élèves (victimes, intimidateurs…), les comptes rendus, les notes et les droits d'accès.",
+    description: "Toutes les fiches situations, les rôles des élèves (victimes, intimidateurs…), les comptes rendus, les notes, les droits d'accès et les qualifications (motifs / manifestations / lieux rattachés). Les listes de motifs, manifestations et lieux elles-mêmes sont conservées.",
     icon:        "📋",
     danger:      true,
-    tables:      ["comptes_rendus", "referent_situation_droits", "situation_eleves", "situations"],
+    tables:      ["comptes_rendus", "referent_situation_droits", "situation_eleves", "situation_motifs", "situation_manifestations", "situation_lieux", "situations"],
   },
   {
     id:          "agenda",
@@ -49,6 +49,34 @@ const ELEMENTS = [
 ] as const;
 
 type ElementId = typeof ELEMENTS[number]["id"];
+
+/* ============================================================
+   Ordre de suppression respectant les clés étrangères
+   (les tables "enfants" sont supprimées avant les "parents")
+   ============================================================ */
+const ORDRE_GLOBAL = [
+  "comptes_rendus",           // → situations, creneaux, profiles
+  "referent_situation_droits",// → situations, profiles
+  "situation_motifs",         // → situations, motifs (conservés)
+  "situation_manifestations", // → situations, manifestations (conservés)
+  "situation_lieux",          // → situations, lieux (conservés)
+  "situation_eleves",         // → situations, eleves
+  "creneaux",                 // → situations, eleves, profiles
+  "situations",               // → profiles
+  "eleves",
+];
+
+/* ============================================================
+   Colonne servant à cibler "toutes les lignes" lors du delete.
+   La plupart des tables ont "id" ; les tables de jonction de
+   qualification ont une clé composite SANS colonne "id".
+   ============================================================ */
+const COLONNE_FILTRE: Record<string, string> = {
+  situation_motifs:         "situation_id",
+  situation_manifestations: "situation_id",
+  situation_lieux:          "situation_id",
+};
+const UUID_ZERO = "00000000-0000-0000-0000-000000000000";
 
 /* ============================================================
    Page principale
@@ -115,30 +143,21 @@ export default function ParametresPage() {
       return;
     }
 
-    // 2. Collecter les tables à vider (dédupliqué + ordre correct)
-    // On s'assure de supprimer dans l'ordre pour respecter les FK
-    const ordreGlobal = [
-      "comptes_rendus",
-      "referent_situation_droits",
-      "situation_eleves",
-      "creneaux",
-      "situations",
-      "eleves",
-    ];
-
+    // 2. Collecter les tables à vider (dédupliqué)
     const tablesToClear = new Set<string>();
     for (const id of selected) {
       const element = ELEMENTS.find((e) => e.id === id);
       if (element) element.tables.forEach((t) => tablesToClear.add(t));
     }
 
-    // Trier dans l'ordre de suppression sûr
-    const tablesOrdered = ordreGlobal.filter((t) => tablesToClear.has(t));
+    // 3. Trier dans l'ordre de suppression sûr (FK)
+    const tablesOrdered = ORDRE_GLOBAL.filter((t) => tablesToClear.has(t));
 
-    // 3. Supprimer dans chaque table
+    // 4. Supprimer dans chaque table (filtre adapté aux tables sans "id")
     const errors: string[] = [];
     for (const table of tablesOrdered) {
-      const { error } = await supabase.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      const col = COLONNE_FILTRE[table] ?? "id";
+      const { error } = await supabase.from(table).delete().neq(col, UUID_ZERO);
       if (error) errors.push(`${table} : ${error.message}`);
     }
 
@@ -190,7 +209,8 @@ export default function ParametresPage() {
             ))}
           </ul>
           <p className="mt-3 text-xs text-[#9A97AD]">
-            Cette action est irréversible. Les comptes référents ne seront pas affectés.
+            Cette action est irréversible. Les comptes référents, l'authentification et les
+            listes de motifs / manifestations / lieux ne seront pas affectés.
           </p>
         </div>
 
@@ -259,8 +279,9 @@ export default function ParametresPage() {
         <div className="mb-4">
           <h2 className="text-lg font-semibold text-[#1B1633]">Réinitialisation des données</h2>
           <p className="mt-1 text-sm text-[#6C6A80]">
-            Sélectionnez les éléments à effacer. Les comptes référents ne peuvent pas être
-            supprimés depuis cette page.
+            Sélectionnez les éléments à effacer. Les comptes référents, l'authentification et
+            les listes de motifs / manifestations / lieux ne peuvent pas être supprimés depuis
+            cette page.
           </p>
         </div>
 
@@ -346,6 +367,17 @@ export default function ParametresPage() {
               </label>
             );
           })}
+        </div>
+
+        {/* Note sur les dépendances */}
+        <div className="mt-4 rounded-xl border border-[#E7E6EF] bg-[#F8F7FC] px-4 py-3">
+          <p className="text-xs text-[#6C6A80] leading-relaxed">
+            💡 Ces données sont liées entre elles. Pour une remise à zéro complète et fiable,
+            utilisez <span className="font-medium text-[#3A3556]">« Tout sélectionner »</span>.
+            Une sélection partielle peut échouer si des éléments non cochés dépendent des
+            éléments cochés (par ex. supprimer les élèves alors que des situations les
+            référencent encore).
+          </p>
         </div>
 
         {/* Avertissement */}
