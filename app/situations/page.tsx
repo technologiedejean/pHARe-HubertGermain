@@ -55,6 +55,54 @@ const STATUT_CONFIG: Record<StatutSituation, { label: string; bg: string; text: 
 const GRAVITE_LABELS = ["", "1 – Mineur", "2 – Faible", "3 – Modéré", "4 – Grave", "5 – Très grave"];
 
 /* ============================================================
+   Diagnostic de session (temporaire — à retirer une fois le
+   problème RLS résolu). Affiche l'état réel de la session
+   Supabase dans une popup, sans avoir besoin des DevTools.
+   ============================================================ */
+async function diagnostiquerSession() {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+      alert("Erreur lors de la récupération de la session :\n" + error.message);
+      return;
+    }
+
+    if (!data.session) {
+      alert(
+        "⚠️ AUCUNE SESSION ACTIVE.\n\n" +
+        "Le navigateur ne considère pas cet utilisateur comme connecté. " +
+        "C'est très probablement la cause du blocage : la base de données " +
+        "ne reçoit aucune preuve d'identité, donc elle refuse l'écriture."
+      );
+      return;
+    }
+
+    const token = data.session.access_token;
+    let payload: any = null;
+    try {
+      payload = JSON.parse(atob(token.split(".")[1]));
+    } catch {
+      // ignore
+    }
+
+    const lignes = [
+      "✅ Session trouvée.",
+      "",
+      "ID utilisateur (session) : " + data.session.user.id,
+      "E-mail                   : " + data.session.user.email,
+      "Rôle dans le jeton (JWT) : " + (payload?.role ?? "inconnu"),
+      "Sujet du jeton (sub)     : " + (payload?.sub ?? "inconnu"),
+      "Expire le                : " + (payload?.exp ? new Date(payload.exp * 1000).toLocaleString("fr-FR") : "inconnu"),
+    ];
+
+    alert(lignes.join("\n"));
+  } catch (e: any) {
+    alert("Erreur inattendue pendant le diagnostic :\n" + (e?.message ?? String(e)));
+  }
+}
+
+/* ============================================================
    Badge statut
    ============================================================ */
 function StatutBadge({ statut }: { statut: StatutSituation }) {
@@ -636,10 +684,17 @@ export default function SituationsPage() {
                 className="mb-0.5 text-xs text-[#6656B8] hover:underline">← Tableau de bord</button>
               <h1 className="text-lg font-semibold">Situations</h1>
             </div>
-            <button onClick={() => setShowModal(true)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1A1440]
-                         text-white hover:bg-[#2A1E5C] transition text-lg"
-              title="Nouvelle situation">＋</button>
+            <div className="flex items-center gap-2">
+              {/* Bouton de diagnostic temporaire — à retirer une fois le bug RLS résolu */}
+              <button onClick={diagnostiquerSession}
+                className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#E7E6EF]
+                           bg-white text-[#6656B8] hover:bg-[#F3F2FA] transition text-sm"
+                title="Diagnostiquer ma session">🔎</button>
+              <button onClick={() => setShowModal(true)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1A1440]
+                           text-white hover:bg-[#2A1E5C] transition text-lg"
+                title="Nouvelle situation">＋</button>
+            </div>
           </div>
           {/* Filtres inline */}
           <div className="flex gap-2">
@@ -682,12 +737,20 @@ export default function SituationsPage() {
             <h1 className="text-2xl font-semibold">Situations</h1>
             <p className="mt-0.5 text-sm text-[#6C6A80]">Suivi des situations de harcèlement.</p>
           </div>
-          <button onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 rounded-xl bg-[#1A1440] px-4 py-2.5 text-sm
-                       font-medium text-white hover:bg-[#2A1E5C] transition
-                       focus:outline-none focus:ring-4 focus:ring-[#7C6BD6]/30">
-            ＋ Nouvelle situation
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Bouton de diagnostic temporaire — à retirer une fois le bug RLS résolu */}
+            <button onClick={diagnostiquerSession}
+              className="flex items-center gap-2 rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5
+                         text-sm font-medium text-[#6656B8] hover:bg-[#F3F2FA] transition">
+              🔎 Diagnostiquer ma session
+            </button>
+            <button onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 rounded-xl bg-[#1A1440] px-4 py-2.5 text-sm
+                         font-medium text-white hover:bg-[#2A1E5C] transition
+                         focus:outline-none focus:ring-4 focus:ring-[#7C6BD6]/30">
+              ＋ Nouvelle situation
+            </button>
+          </div>
         </div>
 
         {/* Filtres inline */}
