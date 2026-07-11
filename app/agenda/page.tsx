@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabase";
 /* ============================================================
    Types
    ============================================================ */
-type Referent = { id: string; nom: string; prenom: string; couleur: string };
+type Referent = { id: string; nom: string; prenom: string; couleur: string; role?: "admin" | "referent" };
 type Situation = { id: string; titre: string; reference: string | null };
 type Eleve = { id: string; nom: string; prenom: string; classe: string };
 
@@ -608,7 +608,9 @@ function ModalCreneau({
               className={inputCls} disabled={!canEdit}>
               <option value="">-- Sans responsable --</option>
               {referents.map((r) => (
-                <option key={r.id} value={r.id}>{r.prenom} {r.nom}</option>
+                <option key={r.id} value={r.id}>
+                  {r.prenom} {r.nom}{r.role === "admin" ? "  ·  Admin ⚙" : ""}
+                </option>
               ))}
             </select>
           </div>
@@ -859,7 +861,7 @@ export default function AgendaPage() {
 
       const [profRes, refRes, sitRes, elevRes] = await Promise.all([
         supabase.from("profiles").select("id, role, couleur, nom, prenom").eq("id", user.id).single(),
-        supabase.from("profiles").select("id, nom, prenom, couleur").eq("role", "referent").eq("actif", true).order("nom"),
+        supabase.from("profiles").select("id, nom, prenom, couleur, role").in("role", ["admin", "referent"]).eq("actif", true).order("nom"),
         supabase.from("situations").select("id, titre, reference").neq("statut", "cloturee").order("titre"),
         supabase.from("situation_eleves").select("situation_id, eleve:eleves(id, nom, prenom, classe)"),
       ]);
@@ -960,7 +962,14 @@ export default function AgendaPage() {
               )}
             </div>
             <input type="checkbox" className="sr-only" checked={refVisibles.has(r.id)} onChange={() => toggleRef(r.id)} />
-            <span className="text-sm text-[#3A3556] flex-1">{r.prenom} {r.nom}</span>
+            <span className="text-sm text-[#3A3556] flex-1 flex items-center gap-1.5">
+              {r.prenom} {r.nom}
+              {r.role === "admin" && (
+                <span className="rounded-full bg-[#1A1440] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">
+                  Admin
+                </span>
+              )}
+            </span>
             <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: r.couleur }} />
           </label>
         ))}
