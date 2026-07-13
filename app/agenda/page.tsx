@@ -1190,11 +1190,22 @@ export default function AgendaPage() {
   const taches         = creneaux.filter((c) => !c.date_creneau);
   const creneauxDates  = creneaux.filter((c) => !!c.date_creneau);
 
+  // Un événement reste visible dès qu'AU MOINS UN des référents impliqués
+  // (référent en charge OU l'un des participants additionnels) est coché
+  // dans le panneau de filtres. Il ne disparaît que si tous les référents
+  // impliqués ont été décochés. S'il n'a aucun référent identifiable
+  // (ni en charge, ni participant reconnu), il dépend du filtre "Sans référent".
   const creneauxFiltres = creneauxDates.filter((c) => {
-    const refId = c.referent_charge_id ?? c.referent_id;
-    const estAssigne = refId ? referents.some((r) => r.id === refId) : false;
-    if (!refId || !estAssigne) return showSansRef;
-    return refVisibles.has(refId);
+    const idsImpliques = new Set<string>();
+    if (c.referent_charge_id && referents.some((r) => r.id === c.referent_charge_id)) {
+      idsImpliques.add(c.referent_charge_id);
+    }
+    for (const p of c.participants ?? []) {
+      if (referents.some((r) => r.id === p.id)) idsImpliques.add(p.id);
+    }
+
+    if (idsImpliques.size === 0) return showSansRef;
+    return Array.from(idsImpliques).some((id) => refVisibles.has(id));
   });
 
   function toggleRef(id: string) {
