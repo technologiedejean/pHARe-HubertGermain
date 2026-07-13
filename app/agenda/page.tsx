@@ -99,11 +99,11 @@ function dureeEnMinutes(debut: string, fin: string): number {
   return Math.max(heureEnMinutes(fin) - heureEnMinutes(debut), 10);
 }
 
-// Couleurs de TOUS les référents impliqués dans le créneau : créateur,
-// référent en charge, et tous les participants additionnels.
+// Couleurs des référents réellement "responsables" du créneau : le référent
+// en charge et les participants additionnels. Le créateur (referent_id) n'a
+// aucune incidence sur la couleur s'il n'est pas lui-même en charge ou participant.
 function couleursParticipants(creneau: Creneau, referents: Referent[]): string[] {
   const ids = new Set<string>();
-  if (creneau.referent_id)        ids.add(creneau.referent_id);
   if (creneau.referent_charge_id) ids.add(creneau.referent_charge_id);
   for (const p of creneau.participants ?? []) ids.add(p.id);
   return Array.from(ids)
