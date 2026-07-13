@@ -475,11 +475,21 @@ function ModalCreneau({
     creneau?.participants?.map((p) => p.id) ?? []
   );
   const [showParticipants, setShowParticipants] = useState(false);
-  const autresReferents = referents.filter((r) => r.id !== profile.id);
+  // La liste des "autres participants" proposés exclut toujours le référent
+  // actuellement désigné comme "en charge" — il n'a pas à apparaître deux fois.
+  const autresReferents = referents.filter((r) => r.id !== form.referent_charge_id);
 
   function toggleParticipant(id: string) {
     setParticipants((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
   }
+
+  // Si le référent en charge change et qu'il était précédemment coché comme
+  // participant, on le décoche automatiquement : il ne peut pas être les deux à la fois.
+  useEffect(() => {
+    if (form.referent_charge_id) {
+      setParticipants((prev) => prev.filter((id) => id !== form.referent_charge_id));
+    }
+  }, [form.referent_charge_id]);
 
   function set(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }));
