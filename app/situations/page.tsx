@@ -1,4 +1,4 @@
-// >>> NOUVEAU FICHIER : app/situations/page.tsx <<<
+// >>> Ce fichier REMPLACE : app/situations/page.tsx <<<
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
    Types
    ============================================================ */
 type StatutSituation = "ouverte" | "en_cours" | "cloturee";
+type NiveauDroit      = "lecture" | "completion" | "modification";
 
 type Situation = {
   id: string;
@@ -41,6 +42,8 @@ type EleveSearch = {
   classe: string;
 };
 
+type Referent = { id: string; nom: string; prenom: string; couleur: string };
+
 type Profile = { id: string; role: "admin" | "referent" };
 
 /* ============================================================
@@ -53,6 +56,11 @@ const STATUT_CONFIG: Record<StatutSituation, { label: string; bg: string; text: 
 };
 
 const GRAVITE_LABELS = ["", "1 – Mineur", "2 – Faible", "3 – Modéré", "4 – Grave", "5 – Très grave"];
+
+const NIVEAU_ECRITURE_LABELS: Record<"completion" | "modification", string> = {
+  completion:   "Complétion (peut ajouter du contenu)",
+  modification: "Modification (contrôle complet)",
+};
 
 /* ============================================================
    Badge statut
@@ -288,14 +296,39 @@ function GroupeActeurs({
 }
 
 /* ============================================================
+   Sélecteur de checkbox générique (référent + couleur)
+   ============================================================ */
+function CaseReferent({ referent, checked, onToggle }: {
+  referent: Referent; checked: boolean; onToggle: () => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2.5">
+      <div className="h-4 w-4 shrink-0 rounded border-2 transition flex items-center justify-center"
+        style={{ backgroundColor: checked ? referent.couleur : "white", borderColor: checked ? referent.couleur : "#D1CFE2" }}>
+        {checked && (
+          <svg viewBox="0 0 10 10" width="8" height="8" fill="none">
+            <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        )}
+      </div>
+      <input type="checkbox" className="sr-only" checked={checked} onChange={onToggle} />
+      <span className="text-sm text-[#3A3556] flex-1">{referent.prenom} {referent.nom}</span>
+      <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: referent.couleur }} />
+    </label>
+  );
+}
+
+/* ============================================================
    Modale — Création d'une situation
    ============================================================ */
 function ModalCreerSituation({
   profileId,
+  referents,
   onClose,
   onSuccess,
 }: {
   profileId: string;
+  referents: Referent[];
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -309,6 +342,48 @@ function ModalCreerSituation({
   const [victimes, setVictimes]         = useState<EntreeActeur[]>([]);
   const [intimidateurs, setIntimidateurs] = useState<EntreeActeur[]>([]);
   const [lanceurs, setLanceurs]         = useState<EntreeActeur[]>([]);
+
+  // ── Droits d'accès ─────────────────────────────────────────────
+  // Lecture : accordée par défaut à tout le monde ; on ne stocke que
+  // les exceptions (référents à qui on la retire).
+  const [showLecture, setShowLecture]   = useState(false);
+  const [lectureRefus, setLectureRefus] = useState<Set<string>>(new Set());
+
+  // Écriture : réservée par défaut au créateur ; on stocke les référents
+  // à qui on accorde explicitement un niveau supérieur.
+  const [showEcriture, setShowEcriture]     = useState(false);
+  const [ecritureAccordee, setEcritureAccordee] = useState<Map<string, "completion" | "modification">>(new Map());
+
+  const autresReferents = referents.filter((r) => r.id !== profileId);
+
+  function toggleLecture(id: string) {
+    setLectureRefus((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        // Retirer la lecture retire logiquement aussi tout droit d'écriture accordé.
+        setEcritureAccordee((p) => { const n = new Map(p); n.delete(id); return n; });
+      }
+      return next;
+    });
+  }
+
+  function toggleEcriture(id: string) {
+    setEcritureAccordee((prev) => {
+      const next = new Map(prev);
+      if (next.has(id)) next.delete(id);
+      else next.set(id, "completion");
+      return next;
+    });
+    // Accorder l'écriture rétablit forcément la lecture.
+    setLectureRefus((prev) => { const next = new Set(prev); next.delete(id); return next; });
+  }
+
+  function setNiveauEcriture(id: string, niveau: "completion" | "modification") {
+    setEcritureAccordee((prev) => { const next = new Map(prev); next.set(id, niveau); return next; });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -373,13 +448,29 @@ function ModalCreerSituation({
       if (acteursErr) { setError(acteursErr.message); setLoading(false); return; }
     }
 
-    // 3. Donner le droit "modification" au créateur (même référent connecté)
-    await supabase.from("referent_situation_droits").insert({
-      situation_id: sit.id,
-      referent_id:  auteurId,
-      niveau:       "modification",
-      accorde_par:  auteurId,
-    });
+    // 3. Droits d'accès
+    //    - Le créateur reçoit toujours "modification" (contrôle complet).
+    //    - Chaque autre référent reçoit par défaut "lecture", sauf s'il a
+    //      été explicitement décoché (aucun accès), ou s'il a reçu un
+    //      niveau supérieur explicitement accordé ("completion"/"modification"),
+    //      qui prend alors le pas sur un retrait de lecture.
+    const droits: { situation_id: string; referent_id: string; niveau: NiveauDroit; accorde_par: string }[] = [
+      { situation_id: sit.id, referent_id: auteurId, niveau: "modification", accorde_par: auteurId },
+    ];
+
+    for (const r of referents) {
+      if (r.id === auteurId) continue;
+      const niveauEcriture = ecritureAccordee.get(r.id);
+      if (niveauEcriture) {
+        droits.push({ situation_id: sit.id, referent_id: r.id, niveau: niveauEcriture, accorde_par: auteurId });
+        continue;
+      }
+      if (lectureRefus.has(r.id)) continue;
+      droits.push({ situation_id: sit.id, referent_id: r.id, niveau: "lecture", accorde_par: auteurId });
+    }
+
+    const { error: droitsErr } = await supabase.from("referent_situation_droits").insert(droits);
+    if (droitsErr) { setError(droitsErr.message); setLoading(false); return; }
 
     setLoading(false); onSuccess(); onClose();
   }
@@ -456,6 +547,104 @@ function ModalCreerSituation({
               className={`mt-1.5 ${inputCls} resize-none`} />
           </div>
 
+          {/* Droits d'accès */}
+          <div className="border-t border-[#F3F2FA] pt-4 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">
+              Droits d'accès
+            </p>
+
+            {/* Lecture */}
+            <div>
+              <button type="button" onClick={() => setShowLecture((v) => !v)}
+                className="flex items-center gap-2 text-sm font-medium text-[#6656B8] hover:underline">
+                <span className={`inline-block transition-transform ${showLecture ? "rotate-90" : ""}`}>▸</span>
+                {lectureRefus.size === 0
+                  ? "Lecture accordée à tous les référents"
+                  : `Lecture accordée à tous sauf ${lectureRefus.size} référent(s)`}
+              </button>
+
+              {showLecture && (
+                <div className="mt-2 rounded-xl border border-[#E7E6EF] bg-[#F8F7FC] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-[#6C6A80]">Décochez les référents à qui retirer la lecture.</p>
+                    <div className="flex gap-2 shrink-0">
+                      <button type="button" onClick={() => setLectureRefus(new Set())}
+                        className="text-[10px] text-[#6656B8] hover:underline">Tous</button>
+                      <span className="text-[#D1CFE2]">|</span>
+                      <button type="button" onClick={() => setLectureRefus(new Set(autresReferents.map((r) => r.id)))}
+                        className="text-[10px] text-[#6656B8] hover:underline">Aucun</button>
+                    </div>
+                  </div>
+                  {autresReferents.length === 0 ? (
+                    <p className="text-xs text-[#B4B1C4] italic">Aucun autre référent.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {autresReferents.map((r) => (
+                        <CaseReferent key={r.id} referent={r}
+                          checked={!lectureRefus.has(r.id)}
+                          onToggle={() => toggleLecture(r.id)} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Écriture */}
+            <div>
+              <button type="button" onClick={() => setShowEcriture((v) => !v)}
+                className="flex items-center gap-2 text-sm font-medium text-[#6656B8] hover:underline">
+                <span className={`inline-block transition-transform ${showEcriture ? "rotate-90" : ""}`}>▸</span>
+                {ecritureAccordee.size === 0
+                  ? "Écriture réservée à vous-même"
+                  : `Droits d'écriture accordés à ${ecritureAccordee.size} référent(s)`}
+              </button>
+
+              {showEcriture && (
+                <div className="mt-2 rounded-xl border border-[#E7E6EF] bg-[#F8F7FC] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-[#6C6A80]">Cochez pour accorder un droit d'écriture.</p>
+                    <div className="flex gap-2 shrink-0">
+                      <button type="button"
+                        onClick={() => {
+                          setEcritureAccordee(new Map(autresReferents.map((r) => [r.id, "completion" as const])));
+                          setLectureRefus(new Set());
+                        }}
+                        className="text-[10px] text-[#6656B8] hover:underline">Tous</button>
+                      <span className="text-[#D1CFE2]">|</span>
+                      <button type="button" onClick={() => setEcritureAccordee(new Map())}
+                        className="text-[10px] text-[#6656B8] hover:underline">Aucun</button>
+                    </div>
+                  </div>
+                  {autresReferents.length === 0 ? (
+                    <p className="text-xs text-[#B4B1C4] italic">Aucun autre référent.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                      {autresReferents.map((r) => {
+                        const niveau = ecritureAccordee.get(r.id);
+                        return (
+                          <div key={r.id} className="space-y-1">
+                            <CaseReferent referent={r} checked={!!niveau} onToggle={() => toggleEcriture(r.id)} />
+                            {niveau && (
+                              <select value={niveau}
+                                onChange={(e) => setNiveauEcriture(r.id, e.target.value as "completion" | "modification")}
+                                className="ml-6 w-[calc(100%-1.5rem)] rounded-lg border border-[#E7E6EF] bg-white
+                                           px-2 py-1 text-xs text-[#3A3556] outline-none focus:border-[#7C6BD6]">
+                                {(["completion","modification"] as const).map((n) => (
+                                  <option key={n} value={n}>{NIVEAU_ECRITURE_LABELS[n]}</option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Actions */}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose}
@@ -482,6 +671,7 @@ export default function SituationsPage() {
   const router  = useRouter();
   const [situations, setSituations] = useState<Situation[]>([]);
   const [profile, setProfile]       = useState<Profile | null>(null);
+  const [referents, setReferents]   = useState<Referent[]>([]);
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState("");
   const [filterStatut, setFilterStatut] = useState<StatutSituation | "tous">("tous");
@@ -520,6 +710,10 @@ export default function SituationsPage() {
       const { data: prof } = await supabase
         .from("profiles").select("id, role").eq("id", user.id).single();
       setProfile(prof);
+      const { data: refs } = await supabase
+        .from("profiles").select("id, nom, prenom, couleur")
+        .eq("role", "referent").eq("actif", true).order("nom");
+      setReferents(refs ?? []);
       await loadSituations();
       setLoading(false);
     }
@@ -638,6 +832,7 @@ export default function SituationsPage() {
       {showModal && profile && (
         <ModalCreerSituation
           profileId={profile.id}
+          referents={referents}
           onClose={() => setShowModal(false)}
           onSuccess={loadSituations}
         />
