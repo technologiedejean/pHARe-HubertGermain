@@ -1,7 +1,7 @@
 // >>> Ce fichier REMPLACE : app/login/page.tsx <<<
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -32,10 +32,27 @@ function LoginForm({
   onDark?: boolean;
 }) {
   const router = useRouter();
+
+  // ── Connexion ────────────────────────────────────────────
+  const [mode, setMode]         = useState<"login" | "forgot">("login");
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
+
+  // ── Mot de passe oublié ─────────────────────────────────
+  const [forgotEmail, setForgotEmail]     = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
+  const [forgotError, setForgotError]     = useState<string | null>(null);
+  const [cooldown, setCooldown]           = useState(0);
+
+  // Décompte du délai avant nouvel envoi possible
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -72,6 +89,42 @@ function LoginForm({
     }
   }
 
+  async function handleForgotSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (cooldown > 0 || forgotLoading || !forgotEmail.trim()) return;
+
+    setForgotLoading(true);
+    setForgotError(null);
+    setForgotMessage(null);
+
+    try {
+      const res  = await fetch("/api/forgot-password", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setForgotError(data.error ?? "Une erreur est survenue.");
+        if (typeof data.retryAfter === "number") setCooldown(data.retryAfter);
+      } else {
+        setForgotMessage(data.message ?? "Si un compte existe avec cette adresse, un e-mail vient d'être envoyé.");
+        setCooldown(typeof data.retryAfter === "number" ? data.retryAfter : 60);
+      }
+    } catch {
+      setForgotError("Impossible de contacter le serveur. Réessayez plus tard.");
+    }
+
+    setForgotLoading(false);
+  }
+
+  function retourConnexion() {
+    setMode("login");
+    setForgotError(null);
+    setForgotMessage(null);
+  }
+
   const inputBase =
     "mt-1.5 w-full rounded-xl border px-4 py-3 outline-none transition " +
     "focus:ring-4 placeholder:text-[#B4B1C4] ";
@@ -92,6 +145,82 @@ function LoginForm({
     ? "text-sm text-[#F3C77B] transition hover:text-[#FFE0A0]"
     : "text-sm text-[#5A47B8] transition hover:text-[#43349A]";
 
+  const buttonStyle = `w-full rounded-xl px-4 py-3 font-medium transition
+                    focus:outline-none focus:ring-4 active:scale-[0.99]
+                    disabled:opacity-60 disabled:cursor-not-allowed ${
+    onDark
+      ? "bg-[#F3C77B] text-[#1A1440] hover:bg-[#FFD98A] focus:ring-[#F3C77B]/30"
+      : "bg-[#1A1440] text-white hover:bg-[#2A1E5C] focus:ring-[#7C6BD6]/30"
+  }`;
+
+  /* ── Panneau "mot de passe oublié" ───────────────────────── */
+  if (mode === "forgot") {
+    return (
+      <form onSubmit={handleForgotSubmit} className="space-y-5">
+        <div>
+          <button type="button" onClick={retourConnexion} className={linkStyle}>
+            ← Retour à la connexion
+          </button>
+        </div>
+
+        <p className={onDark ? "text-sm text-white/70" : "text-sm text-[#6C6A80]"}>
+          Saisissez votre adresse e-mail : si elle correspond à un compte, vous recevrez
+          un lien pour définir un nouveau mot de passe.
+        </p>
+
+        {forgotMessage && (
+          <div className={`rounded-xl px-4 py-3 text-sm ${
+            onDark
+              ? "bg-emerald-500/20 text-emerald-100"
+              : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+          }`}>
+            {forgotMessage}
+          </div>
+        )}
+
+        {forgotError && (
+          <div className={`rounded-xl px-4 py-3 text-sm ${
+            onDark
+              ? "bg-red-500/20 text-red-200"
+              : "bg-red-50 text-red-700 border border-red-200"
+          }`}>
+            {forgotError}
+          </div>
+        )}
+
+        <div>
+          <label htmlFor={`${idPrefix}-forgot-email`} className={labelStyle}>
+            Adresse e-mail
+          </label>
+          <input
+            id={`${idPrefix}-forgot-email`}
+            name="forgot-email"
+            type="email"
+            autoComplete="email"
+            required
+            value={forgotEmail}
+            onChange={(e) => setForgotEmail(e.target.value)}
+            placeholder="prenom.nom@college.fr"
+            className={inputStyle}
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={forgotLoading || cooldown > 0 || !forgotEmail.trim()}
+          className={buttonStyle}
+        >
+          {forgotLoading
+            ? "Envoi en cours…"
+            : cooldown > 0
+              ? `Réessayez dans ${cooldown}s`
+              : "Envoyer le lien de réinitialisation"}
+        </button>
+      </form>
+    );
+  }
+
+  /* ── Formulaire de connexion ─────────────────────────────── */
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {/* Message d'erreur */}
@@ -127,9 +256,13 @@ function LoginForm({
           <label htmlFor={`${idPrefix}-password`} className={labelStyle}>
             Mot de passe
           </label>
-          <a href="#" className={linkStyle}>
+          <button
+            type="button"
+            onClick={() => { setMode("forgot"); setForgotEmail(email); }}
+            className={linkStyle}
+          >
             Mot de passe oublié ?
-          </a>
+          </button>
         </div>
         <input
           id={`${idPrefix}-password`}
@@ -144,17 +277,7 @@ function LoginForm({
         />
       </div>
 
-      <button
-        type="submit"
-        disabled={loading}
-        className={`w-full rounded-xl px-4 py-3 font-medium transition
-                    focus:outline-none focus:ring-4 active:scale-[0.99]
-                    disabled:opacity-60 disabled:cursor-not-allowed ${
-          onDark
-            ? "bg-[#F3C77B] text-[#1A1440] hover:bg-[#FFD98A] focus:ring-[#F3C77B]/30"
-            : "bg-[#1A1440] text-white hover:bg-[#2A1E5C] focus:ring-[#7C6BD6]/30"
-        }`}
-      >
+      <button type="submit" disabled={loading} className={buttonStyle}>
         {loading ? "Connexion en cours…" : "Se connecter"}
       </button>
     </form>
