@@ -182,11 +182,13 @@ function CreneauBlock({
 
   let blockStyle: React.CSSProperties = { ...style };
 
-  if (creneau.a_cr) {
-    blockStyle = { ...blockStyle, ...styleMulticolore(couleurs), border: "none" };
-  } else if (creneau.statut === "disponible") {
+  if (creneau.statut === "disponible") {
     blockStyle = { ...blockStyle, backgroundColor: "#F3F2FA", border: "1px solid #E7E6EF" };
+  } else if (creneau.statut === "realise") {
+    // Réalisé → case PLEINE, remplie avec la ou les couleur(s) du/des référent(s) concerné(s)
+    blockStyle = { ...blockStyle, ...styleMulticolore(couleurs), border: "none" };
   } else {
+    // Prévu → case ENCADRÉE (fond blanc, bordure colorée ; plusieurs liserés empilés si multicolore)
     blockStyle = {
       ...blockStyle,
       backgroundColor: "white",
@@ -199,9 +201,11 @@ function CreneauBlock({
     };
   }
 
-  const textColor = creneau.a_cr ? "white" : "#1B1633";
-  const label     = creneau.situation?.titre ?? creneau.titre ?? "Disponibilité";
-  const titleAttr = nomsParticipants(creneau, referents);
+  const textColor   = creneau.statut === "realise" ? "white" : "#1B1633";
+  const label       = creneau.situation?.titre ?? creneau.titre ?? "Disponibilité";
+  const titleAttr   = nomsParticipants(creneau, referents);
+  // Petit repère discret : entretien réalisé mais dont le compte rendu n'a pas encore été rédigé.
+  const crManquant  = creneau.statut === "realise" && !creneau.a_cr;
 
   return (
     <div
@@ -217,6 +221,10 @@ function CreneauBlock({
         <span className="font-semibold">{formatHeure(creneau.heure_debut)}</span>
         {!compact && <span className="ml-1 opacity-85 truncate block">{label}</span>}
       </div>
+      {crManquant && (
+        <div className="absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white"
+          title="Compte rendu non rédigé" />
+      )}
       {hovered && (
         <div className="absolute top-0.5 right-0.5 flex gap-0.5 z-20" onClick={(e) => e.stopPropagation()}>
           <button onClick={onClick}
@@ -1154,15 +1162,21 @@ export default function AgendaPage() {
     <div className="flex flex-wrap gap-3 text-xs text-[#6C6A80]">
       <div className="flex items-center gap-1.5">
         <span className="inline-block h-3.5 w-3.5 rounded border-2 border-[#6656B8] bg-white" />
-        Sans CR
+        Prévu
       </div>
       <div className="flex items-center gap-1.5">
         <span className="inline-block h-3.5 w-3.5 rounded bg-[#6656B8]" />
-        CR disponible
+        Réalisé
       </div>
       <div className="flex items-center gap-1.5">
         <span className="inline-block h-3.5 w-3.5 rounded bg-[#F3F2FA] border border-[#EEEDF5]" />
         Disponibilité
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="relative inline-block h-3.5 w-3.5 rounded bg-[#6656B8]">
+          <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white" />
+        </span>
+        CR non rédigé
       </div>
     </div>
   );
