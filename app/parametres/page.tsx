@@ -1,4 +1,4 @@
-// >>> NOUVEAU FICHIER : app/parametres/page.tsx <<<
+// >>> Ce fichier REMPLACE : app/parametres/page.tsx <<<
 "use client";
 
 import { useState, useEffect } from "react";
@@ -25,10 +25,10 @@ const ELEMENTS = [
   {
     id:          "agenda",
     label:       "Agenda",
-    description: "Tous les créneaux de tous les référents (entretiens prévus, réalisés, disponibilités).",
+    description: "Tous les créneaux de tous les référents (entretiens prévus, réalisés, disponibilités), ainsi que les autres référents participants associés à ces créneaux.",
     icon:        "📅",
     danger:      false,
-    tables:      ["creneaux"],
+    tables:      ["creneau_participants", "creneaux"],
   },
   {
     id:          "eleves",
@@ -61,6 +61,7 @@ const ORDRE_GLOBAL = [
   "situation_manifestations", // → situations, manifestations (conservés)
   "situation_lieux",          // → situations, lieux (conservés)
   "situation_eleves",         // → situations, eleves
+  "creneau_participants",     // → creneaux, profiles
   "creneaux",                 // → situations, eleves, profiles
   "situations",               // → profiles
   "eleves",
@@ -79,115 +80,28 @@ const COLONNE_FILTRE: Record<string, string> = {
 const UUID_ZERO = "00000000-0000-0000-0000-000000000000";
 
 /* ============================================================
-   Page principale
+   Modale de confirmation
+   (Composant HORS du render de la page pour garder une identité
+   stable entre les rendus — sinon le champ mot de passe perd le
+   focus à chaque frappe, React recréant le composant à chaque fois.)
    ============================================================ */
-export default function ParametresPage() {
-  const router = useRouter();
-  const [profile, setProfile]         = useState<Profile | null>(null);
-  const [loading, setLoading]         = useState(true);
-
-  // Réinitialisation
-  const [selected, setSelected]       = useState<Set<ElementId>>(new Set());
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [password, setPassword]       = useState("");
-  const [pwError, setPwError]         = useState<string | null>(null);
-  const [resetting, setResetting]     = useState(false);
-  const [resetDone, setResetDone]     = useState<string[] | null>(null);
-
-  useEffect(() => {
-    async function init() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.push("/login"); return; }
-      const { data: prof } = await supabase
-        .from("profiles")
-        .select("id, role, email")
-        .eq("id", user.id)
-        .single();
-      if (!prof || prof.role !== "admin") { router.push("/dashboard"); return; }
-      setProfile(prof);
-      setLoading(false);
-    }
-    init();
-  }, [router]);
-
-  function toggleElement(id: ElementId) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }
-
-  function toggleAll() {
-    if (selected.size === ELEMENTS.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(ELEMENTS.map((e) => e.id)));
-    }
-  }
-
-  async function handleReset() {
-    if (!profile) return;
-    setPwError(null);
-    setResetting(true);
-
-    // 1. Vérifier le mot de passe via une tentative de connexion
-    const { error: authError } = await supabase.auth.signInWithPassword({
-      email:    profile.email,
-      password: password.trim(),
-    });
-
-    if (authError) {
-      setPwError("Mot de passe incorrect. Réessayez.");
-      setResetting(false);
-      return;
-    }
-
-    // 2. Collecter les tables à vider (dédupliqué)
-    const tablesToClear = new Set<string>();
-    for (const id of selected) {
-      const element = ELEMENTS.find((e) => e.id === id);
-      if (element) element.tables.forEach((t) => tablesToClear.add(t));
-    }
-
-    // 3. Trier dans l'ordre de suppression sûr (FK)
-    const tablesOrdered = ORDRE_GLOBAL.filter((t) => tablesToClear.has(t));
-
-    // 4. Supprimer dans chaque table (filtre adapté aux tables sans "id")
-    const errors: string[] = [];
-    for (const table of tablesOrdered) {
-      const col = COLONNE_FILTRE[table] ?? "id";
-      const { error } = await supabase.from(table).delete().neq(col, UUID_ZERO);
-      if (error) errors.push(`${table} : ${error.message}`);
-    }
-
-    setResetting(false);
-    setPassword("");
-
-    if (errors.length > 0) {
-      setPwError(`Erreurs lors de la réinitialisation :\n${errors.join("\n")}`);
-    } else {
-      setResetDone(ELEMENTS.filter((e) => selected.has(e.id)).map((e) => e.label));
-      setSelected(new Set());
-      setShowConfirm(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#FBFBFD]">
-        <span className="text-[#6C6A80]">Chargement…</span>
-      </div>
-    );
-  }
-
-  const canReset = selected.size > 0;
-
-  /* ── Modale de confirmation ─────────────────────────────── */
-  const ModalConfirmation = () => (
+function ModalConfirmation({
+  elementsSelectionnes, password, setPassword, pwError, setPwError,
+  resetting, onConfirm, onCancel,
+}: {
+  elementsSelectionnes: typeof ELEMENTS[number][];
+  password: string;
+  setPassword: (v: string) => void;
+  pwError: string | null;
+  setPwError: (v: string | null) => void;
+  resetting: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) { setShowConfirm(false); setPwError(null); setPassword(""); } }}
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
         {/* En-tête */}
@@ -202,7 +116,7 @@ export default function ParametresPage() {
             Les éléments suivants seront <span className="font-semibold text-red-600">définitivement effacés</span> :
           </p>
           <ul className="mt-2 space-y-1">
-            {ELEMENTS.filter((e) => selected.has(e.id)).map((e) => (
+            {elementsSelectionnes.map((e) => (
               <li key={e.id} className="flex items-center gap-2 text-sm text-[#3A3556]">
                 <span>{e.icon}</span> {e.label}
               </li>
@@ -227,7 +141,8 @@ export default function ParametresPage() {
             className="w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm
                        text-[#1B1633] outline-none transition placeholder:text-[#B4B1C4]
                        focus:border-red-400 focus:ring-4 focus:ring-red-100"
-            onKeyDown={(e) => { if (e.key === "Enter" && password.trim()) handleReset(); }}
+            onKeyDown={(e) => { if (e.key === "Enter" && password.trim()) onConfirm(); }}
+            autoFocus
           />
           {pwError && (
             <p className="text-sm text-red-600 whitespace-pre-wrap">{pwError}</p>
@@ -237,14 +152,14 @@ export default function ParametresPage() {
         {/* Actions */}
         <div className="flex gap-3 border-t border-[#EEEDF5] px-6 py-4">
           <button
-            onClick={() => { setShowConfirm(false); setPwError(null); setPassword(""); }}
+            onClick={onCancel}
             className="flex-1 rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5
                        text-sm font-medium text-[#3A3556] hover:bg-[#F3F2FA] transition"
           >
             Annuler
           </button>
           <button
-            onClick={handleReset}
+            onClick={onConfirm}
             disabled={!password.trim() || resetting}
             className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-medium
                        text-white hover:bg-red-700 transition disabled:opacity-40"
@@ -255,9 +170,29 @@ export default function ParametresPage() {
       </div>
     </div>
   );
+}
 
-  /* ── Contenu principal ───────────────────────────────────── */
-  const Content = () => (
+/* ============================================================
+   Contenu principal
+   (Idem : composant hors du render de la page pour éviter tout
+   remount inutile de ses enfants.)
+   ============================================================ */
+function Content({
+  selected, toggleElement, toggleAll,
+  resetDone, setResetDone,
+  canReset, onOuvrirConfirmation,
+  router,
+}: {
+  selected: Set<ElementId>;
+  toggleElement: (id: ElementId) => void;
+  toggleAll: () => void;
+  resetDone: string[] | null;
+  setResetDone: (v: string[] | null) => void;
+  canReset: boolean;
+  onOuvrirConfirmation: () => void;
+  router: ReturnType<typeof useRouter>;
+}) {
+  return (
     <div className="max-w-2xl space-y-8">
 
       {/* Confirmation succès */}
@@ -393,7 +328,7 @@ export default function ParametresPage() {
         {/* Bouton réinitialiser */}
         <div className="mt-5">
           <button
-            onClick={() => setShowConfirm(true)}
+            onClick={onOuvrirConfirmation}
             disabled={!canReset}
             className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-sm
                        font-medium text-white hover:bg-red-700 transition
@@ -425,10 +360,134 @@ export default function ParametresPage() {
       </div>
     </div>
   );
+}
+
+/* ============================================================
+   Page principale
+   ============================================================ */
+export default function ParametresPage() {
+  const router = useRouter();
+  const [profile, setProfile]         = useState<Profile | null>(null);
+  const [loading, setLoading]         = useState(true);
+
+  // Réinitialisation
+  const [selected, setSelected]       = useState<Set<ElementId>>(new Set());
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [password, setPassword]       = useState("");
+  const [pwError, setPwError]         = useState<string | null>(null);
+  const [resetting, setResetting]     = useState(false);
+  const [resetDone, setResetDone]     = useState<string[] | null>(null);
+
+  useEffect(() => {
+    async function init() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { router.push("/login"); return; }
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("id, role, email")
+        .eq("id", user.id)
+        .single();
+      if (!prof || prof.role !== "admin") { router.push("/dashboard"); return; }
+      setProfile(prof);
+      setLoading(false);
+    }
+    init();
+  }, [router]);
+
+  function toggleElement(id: ElementId) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selected.size === ELEMENTS.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(ELEMENTS.map((e) => e.id)));
+    }
+  }
+
+  function fermerConfirmation() {
+    setShowConfirm(false);
+    setPwError(null);
+    setPassword("");
+  }
+
+  async function handleReset() {
+    if (!profile) return;
+    setPwError(null);
+    setResetting(true);
+
+    // 1. Vérifier le mot de passe via une tentative de connexion
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email:    profile.email,
+      password: password.trim(),
+    });
+
+    if (authError) {
+      setPwError("Mot de passe incorrect. Réessayez.");
+      setResetting(false);
+      return;
+    }
+
+    // 2. Collecter les tables à vider (dédupliqué)
+    const tablesToClear = new Set<string>();
+    for (const id of selected) {
+      const element = ELEMENTS.find((e) => e.id === id);
+      if (element) element.tables.forEach((t) => tablesToClear.add(t));
+    }
+
+    // 3. Trier dans l'ordre de suppression sûr (FK)
+    const tablesOrdered = ORDRE_GLOBAL.filter((t) => tablesToClear.has(t));
+
+    // 4. Supprimer dans chaque table (filtre adapté aux tables sans "id")
+    const errors: string[] = [];
+    for (const table of tablesOrdered) {
+      const col = COLONNE_FILTRE[table] ?? "id";
+      const { error } = await supabase.from(table).delete().neq(col, UUID_ZERO);
+      if (error) errors.push(`${table} : ${error.message}`);
+    }
+
+    setResetting(false);
+    setPassword("");
+
+    if (errors.length > 0) {
+      setPwError(`Erreurs lors de la réinitialisation :\n${errors.join("\n")}`);
+    } else {
+      setResetDone(ELEMENTS.filter((e) => selected.has(e.id)).map((e) => e.label));
+      setSelected(new Set());
+      setShowConfirm(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#FBFBFD]">
+        <span className="text-[#6C6A80]">Chargement…</span>
+      </div>
+    );
+  }
+
+  const canReset = selected.size > 0;
+  const elementsSelectionnes = ELEMENTS.filter((e) => selected.has(e.id));
 
   return (
     <div className="min-h-screen bg-[#FBFBFD] text-[#1B1633]">
-      {showConfirm && <ModalConfirmation />}
+      {showConfirm && (
+        <ModalConfirmation
+          elementsSelectionnes={elementsSelectionnes}
+          password={password}
+          setPassword={setPassword}
+          pwError={pwError}
+          setPwError={setPwError}
+          resetting={resetting}
+          onConfirm={handleReset}
+          onCancel={fermerConfirmation}
+        />
+      )}
 
       {/* ════════════════════════════════════════════════════
           📱 MOBILE
@@ -441,7 +500,12 @@ export default function ParametresPage() {
           <p className="text-xs text-[#9A97AD] mt-0.5">Accès administrateur</p>
         </header>
         <main className="flex-1 px-5 py-6">
-          <Content />
+          <Content
+            selected={selected} toggleElement={toggleElement} toggleAll={toggleAll}
+            resetDone={resetDone} setResetDone={setResetDone}
+            canReset={canReset} onOuvrirConfirmation={() => setShowConfirm(true)}
+            router={router}
+          />
         </main>
       </div>
 
@@ -457,7 +521,12 @@ export default function ParametresPage() {
             Accès réservé à l'administrateur.
           </p>
         </div>
-        <Content />
+        <Content
+          selected={selected} toggleElement={toggleElement} toggleAll={toggleAll}
+          resetDone={resetDone} setResetDone={setResetDone}
+          canReset={canReset} onOuvrirConfirmation={() => setShowConfirm(true)}
+          router={router}
+        />
       </div>
     </div>
   );
