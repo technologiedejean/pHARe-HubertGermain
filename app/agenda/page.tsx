@@ -54,6 +54,12 @@ const MOIS_LONGS   = [
   "Juillet","Août","Septembre","Octobre","Novembre","Décembre",
 ];
 
+// Valeur sentinelle utilisée dans le sélecteur "Type d'événement" pour
+// représenter le choix "Réunion / formation (sans situation)". Ce n'est
+// jamais stocké tel quel en base : quand elle est sélectionnée, situation_id
+// est enregistré à null.
+const REUNION_VALUE = "__reunion__";
+
 /* ============================================================
    Helpers dates — heure LOCALE pour éviter le décalage UTC
    ============================================================ */
@@ -442,6 +448,114 @@ function VueMois({ moisRef, creneaux, referents, profile, onClickCreneau, onClic
 }
 
 /* ============================================================
+   Panneau compte rendu (créneau "réunion", sans situation)
+   Lecture ouverte à tous ; écriture réservée aux participants.
+   ============================================================ */
+function PanneauCRReunion({ creneau, profile, canWrite, onGlobalRefresh }: {
+  creneau: Creneau; profile: Profile; canWrite: boolean; onGlobalRefresh: () => void;
+}) {
+  const [cr, setCr]           = useState<{
+    id: string; contenu: string; created_at: string; updated_at: string;
+    auteur?: { prenom: string; nom: string; couleur: string };
+  } | null>(null);
+  const [loadingCr, setLoadingCr] = useState(true);
+  const [editing, setEditing]     = useState(false);
+  const [contenu, setContenu]     = useState("");
+  const [saving, setSaving]       = useState(false);
+
+  const load = useCallback(async () => {
+    setLoadingCr(true);
+    const { data } = await supabase
+      .from("comptes_rendus")
+      .select("id, contenu, created_at, updated_at, auteur:profiles!comptes_rendus_auteur_id_fkey(prenom, nom, couleur)")
+      .eq("creneau_id", creneau.id)
+      .not("contenu", "like", "[NOTE]%")
+      .maybeSingle();
+    setCr(data as any);
+    setLoadingCr(false);
+  }, [creneau.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleSave() {
+    if (!contenu.trim() || !canWrite) return;
+    setSaving(true);
+    if (cr) {
+      await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", cr.id);
+    } else {
+      await supabase.from("comptes_rendus").insert({
+        creneau_id:     creneau.id,
+        situation_id:   null,
+        auteur_id:      profile.id,
+        contenu:        contenu.trim(),
+        date_entretien: creneau.date_creneau,
+        archive:        false,
+      });
+    }
+    setSaving(false);
+    setEditing(false);
+    await load();
+    onGlobalRefresh();
+  }
+
+  const inputCls2 =
+    "w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm text-[#1B1633] " +
+    "outline-none transition placeholder:text-[#B4B1C4] focus:border-[#7C6BD6] focus:ring-4 focus:ring-[#7C6BD6]/15";
+
+  return (
+    <div className="rounded-xl border border-[#E7E6EF] bg-[#F8F7FC] p-4 space-y-3">
+      <p className="text-sm font-semibold text-[#1B1633]">📝 Compte rendu de la réunion</p>
+
+      {loadingCr ? (
+        <p className="text-xs text-[#9A97AD]">Chargement…</p>
+      ) : editing && canWrite ? (
+        <div className="space-y-2">
+          <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={6}
+            placeholder="Rédigez le compte rendu de cette réunion…"
+            className={inputCls2 + " resize-none"} autoFocus />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { setEditing(false); setContenu(cr?.contenu ?? ""); }}
+              className="flex-1 rounded-xl border border-[#E7E6EF] bg-white px-3 py-2 text-xs text-[#3A3556] hover:bg-[#F3F2FA]">
+              Annuler
+            </button>
+            <button type="button" onClick={handleSave} disabled={saving || !contenu.trim()}
+              className="flex-1 rounded-xl bg-[#1A1440] px-3 py-2 text-xs text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
+              {saving ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        </div>
+      ) : cr ? (
+        <div className="space-y-2">
+          <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{cr.contenu}</p>
+          <p className="text-[11px] text-[#9A97AD]">
+            {cr.auteur?.prenom} {cr.auteur?.nom} · rédigé le {new Date(cr.created_at).toLocaleDateString("fr-FR")}
+            {cr.updated_at !== cr.created_at && " (modifié)"}
+          </p>
+          {canWrite && (
+            <button type="button" onClick={() => { setEditing(true); setContenu(cr.contenu); }}
+              className="rounded-xl border border-[#E7E6EF] bg-white px-3 py-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition">
+              ✏️ Modifier le compte rendu
+            </button>
+          )}
+        </div>
+      ) : (
+        <div>
+          <p className="text-xs text-[#9A97AD] mb-2">Aucun compte rendu rédigé pour cette réunion.</p>
+          {canWrite ? (
+            <button type="button" onClick={() => { setEditing(true); setContenu(""); }}
+              className="rounded-xl bg-[#1A1440] px-3 py-2 text-xs font-medium text-white hover:bg-[#2A1E5C] transition">
+              ✏️ Rédiger le compte rendu
+            </button>
+          ) : (
+            <p className="text-xs text-[#B4B1C4] italic">Seuls les participants de cette réunion peuvent rédiger ce compte rendu.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
    Modale — Créer / modifier un créneau (daté ou non)
    ============================================================ */
 function ModalCreneau({
@@ -506,10 +620,19 @@ function ModalCreneau({
   const hasSituation      = !!form.situation_id;
   const elevesDisponibles = hasSituation ? (elevesMap.get(form.situation_id) ?? []) : [];
 
+  // Qui a le droit de lire/rédiger le compte rendu de cette réunion :
+  // référent en charge, participants additionnels, ou admin. Basé sur l'état
+  // déjà enregistré du créneau (pas sur des modifications non sauvegardées).
+  const canWriteCR = !!creneau && (
+    profile.role === "admin" ||
+    creneau.referent_charge_id === profile.id ||
+    (creneau.participants ?? []).some((p) => p.id === profile.id)
+  );
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!hasSituation && !form.titre.trim()) {
-      setError("Saisissez un titre ou rattachez à une situation."); return;
+      setError("Saisissez un titre pour cette réunion."); return;
     }
     if (form.heure_fin <= form.heure_debut) {
       setError("L'heure de fin doit être après l'heure de début."); return;
@@ -651,20 +774,33 @@ function ModalCreneau({
           )}
 
           <div>
-            <label className={labelCls}>Situation <span className="ml-1 text-xs font-normal text-[#9A97AD]">(optionnel)</span></label>
-            <select value={form.situation_id}
-              onChange={(e) => { set("situation_id", e.target.value); set("eleve_id", ""); }}
-              className={inputCls} disabled={!canEdit}>
-              <option value="">-- Aucune (réunion, formation…) --</option>
-              {situations.map((s) => (
-                <option key={s.id} value={s.id}>{s.reference ? `[${s.reference}] ` : ""}{s.titre}</option>
-              ))}
+            <label className={labelCls}>Type d'événement <span className="text-red-500">*</span></label>
+            <select
+              value={form.situation_id || REUNION_VALUE}
+              onChange={(e) => {
+                const val = e.target.value;
+                set("situation_id", val === REUNION_VALUE ? "" : val);
+                set("eleve_id", "");
+              }}
+              className={inputCls} disabled={!canEdit}
+            >
+              <option value={REUNION_VALUE}>💬 Réunion / formation (sans situation)</option>
+              {situations.length > 0 && (
+                <optgroup label="Situations">
+                  {situations.map((s) => (
+                    <option key={s.id} value={s.id}>{s.reference ? `[${s.reference}] ` : ""}{s.titre}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
+            <p className="mt-1 text-xs text-[#9A97AD]">
+              Choisissez « Réunion / formation » pour tout événement qui n'est lié à aucune situation.
+            </p>
           </div>
 
           {!hasSituation && (
             <div>
-              <label className={labelCls}>Titre de l'événement <span className="text-red-500">*</span></label>
+              <label className={labelCls}>Titre de la réunion <span className="text-red-500">*</span></label>
               <input type="text" placeholder="Ex. : Réunion d'équipe, Formation…"
                 value={form.titre} onChange={(e) => set("titre", e.target.value)}
                 className={inputCls} disabled={!canEdit} />
@@ -765,6 +901,17 @@ function ModalCreneau({
               rows={3} placeholder="Remarques, lieu, contexte…"
               className={inputCls + " resize-none"} disabled={!canEdit} />
           </div>
+
+          {/* Compte rendu — uniquement pour les réunions déjà enregistrées (pas de situation) */}
+          {!hasSituation && !isTache && (
+            isEdit ? (
+              <PanneauCRReunion creneau={creneau!} profile={profile} canWrite={canWriteCR} onGlobalRefresh={onSuccess} />
+            ) : (
+              <p className="text-xs text-[#9A97AD] italic">
+                Vous pourrez rédiger le compte rendu de cette réunion une fois le créneau enregistré.
+              </p>
+            )
+          )}
 
           <div className="flex gap-3 pt-2">
             {isEdit && canEdit && (

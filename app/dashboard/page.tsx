@@ -46,6 +46,7 @@ type Stats = {
 const NAV_ITEMS = [
   { href: "/dashboard",  label: "Tableau de bord", icon: "⬡"  },
   { href: "/situations", label: "Situations",       icon: "📋" },
+  { href: "/reunions",   label: "Réunions",         icon: "🗓️" },
   { href: "/eleves",     label: "Élèves",           icon: "👤" },
   { href: "/agenda",     label: "Agenda",           icon: "📅" },
   { href: "/referents",  label: "Référents",        icon: "👥", adminOnly: true },
