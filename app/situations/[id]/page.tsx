@@ -165,14 +165,16 @@ function IconCrayon({ size = 13 }: { size?: number }) {
   );
 }
 
-function CheckBox({ checked, onChange, loading = false }: {
-  checked: boolean; onChange: () => void; loading?: boolean;
+function CheckBox({ checked, onChange, loading = false, disabled = false }: {
+  checked: boolean; onChange: () => void; loading?: boolean; disabled?: boolean;
 }) {
   return (
-    <div className={`h-[18px] w-[18px] shrink-0 rounded border-2 flex items-center justify-center transition cursor-pointer ${
+    <div className={`h-[18px] w-[18px] shrink-0 rounded border-2 flex items-center justify-center transition ${
+      disabled  ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+    } ${
       loading   ? "border-[#B4B1C4] bg-[#F3F2FA]" :
       checked   ? "border-[#6656B8] bg-[#6656B8]"  : "border-[#D1CFE2] bg-white"
-    }`} onClick={() => !loading && onChange()}>
+    }`} onClick={() => !loading && !disabled && onChange()}>
       {loading ? (
         <div className="h-2 w-2 rounded-full border border-[#9A97AD] border-t-transparent animate-spin" />
       ) : checked ? (
@@ -269,9 +271,10 @@ function ChampEleve({ placeholder, onSelect, allowFreeText = false }: {
 /* ============================================================
    ONGLET INFOS
    ============================================================ */
-function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
+function OngletInfos({ situation, acteurs, profile, situationId, onRefresh, peutCompleter, peutModifier }: {
   situation: Situation; acteurs: ActeurSituation[];
   profile: Profile; situationId: string; onRefresh: () => void;
+  peutCompleter: boolean; peutModifier: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving]   = useState(false);
@@ -294,18 +297,21 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
   }, [situation]);
 
   async function handleSaveStatut(val: StatutSituation) {
+    if (!peutModifier) return;
     setForm((f) => ({ ...f, statut: val }));
     await supabase.from("situations").update({ statut: val }).eq("id", situationId);
     onRefresh();
   }
 
   async function handleSaveGravite(val: number) {
+    if (!peutModifier) return;
     setForm((f) => ({ ...f, gravite: val }));
     await supabase.from("situations").update({ gravite: val || null }).eq("id", situationId);
     onRefresh();
   }
 
   async function handleSave() {
+    if (!peutModifier) return;
     setSaving(true);
     await supabase.from("situations").update({
       titre: form.titre.trim(), description: form.description.trim() || null,
@@ -316,12 +322,13 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
   }
 
   async function handleSupprimerActeur(id: string) {
+    if (!peutModifier) return;
     await supabase.from("situation_eleves").delete().eq("id", id);
     onRefresh();
   }
 
   async function handleAjouterActeur() {
-    if (!ajoutRole) return;
+    if (!ajoutRole || !peutCompleter) return;
     setAjoutLoading(true);
     if (ajoutEleve) {
       await supabase.from("situation_eleves").insert({ situation_id: situationId, eleve_id: ajoutEleve.id, role: ajoutRole });
@@ -350,7 +357,7 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
             </>
           )}
         </div>
-        {profile.role === "admin" && (
+        {peutModifier && (
           <div className="flex gap-2 shrink-0">
             {editing ? (
               <>
@@ -371,7 +378,7 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
         )}
       </div>
 
-      {editing ? (
+      {editing && peutModifier ? (
         <div className="space-y-4 rounded-2xl border border-[#EEEDF5] bg-white p-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -409,18 +416,26 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-2xl border border-[#EEEDF5] bg-white p-4">
             <p className="text-xs text-[#9A97AD] mb-1.5">Statut</p>
-            <select value={form.statut} onChange={(e) => handleSaveStatut(e.target.value as StatutSituation)} className={selectCardCls}>
-              <option value="ouverte">Signalée</option>
-              <option value="en_cours">En cours de traitement</option>
-              <option value="cloturee">Traitée</option>
-            </select>
+            {peutModifier ? (
+              <select value={form.statut} onChange={(e) => handleSaveStatut(e.target.value as StatutSituation)} className={selectCardCls}>
+                <option value="ouverte">Signalée</option>
+                <option value="en_cours">En cours de traitement</option>
+                <option value="cloturee">Traitée</option>
+              </select>
+            ) : (
+              <p className="text-sm font-medium text-[#1B1633]">{STATUT_CONFIG[form.statut].label}</p>
+            )}
           </div>
           <div className="rounded-2xl border border-[#EEEDF5] bg-white p-4">
             <p className="text-xs text-[#9A97AD] mb-1.5">Gravité</p>
-            <select value={form.gravite} onChange={(e) => handleSaveGravite(Number(e.target.value))} className={selectCardCls}>
-              <option value={0}>— Non évalué</option>
-              {[1,2,3,4,5].map((n) => <option key={n} value={n}>{GRAVITE_LABELS[n]}</option>)}
-            </select>
+            {peutModifier ? (
+              <select value={form.gravite} onChange={(e) => handleSaveGravite(Number(e.target.value))} className={selectCardCls}>
+                <option value={0}>— Non évalué</option>
+                {[1,2,3,4,5].map((n) => <option key={n} value={n}>{GRAVITE_LABELS[n]}</option>)}
+              </select>
+            ) : (
+              <p className="text-sm font-medium text-[#1B1633]">{form.gravite ? GRAVITE_LABELS[form.gravite] : "— Non évalué"}</p>
+            )}
           </div>
           <div className="rounded-2xl border border-[#EEEDF5] bg-white p-4">
             <p className="text-xs text-[#9A97AD] mb-1">Signalé le</p>
@@ -456,7 +471,9 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
                       <div key={a.id} className="flex items-center gap-1.5 rounded-full border border-[#E7E6EF] bg-[#F8F7FC] px-3 py-1">
                         <span className="text-sm text-[#1B1633]">{nomActeur(a)}</span>
                         {a.eleve && <span className="text-xs text-[#9A97AD]">{a.eleve.classe}</span>}
-                        <button onClick={() => handleSupprimerActeur(a.id)} className="ml-1 text-[#C4C2D4] hover:text-red-500 transition text-xs">✕</button>
+                        {peutModifier && (
+                          <button onClick={() => handleSupprimerActeur(a.id)} className="ml-1 text-[#C4C2D4] hover:text-red-500 transition text-xs">✕</button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -465,28 +482,30 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
             );
           })}
         </div>
-        <div className="mt-5 border-t border-[#F3F2FA] pt-4">
-          <p className="text-sm font-medium text-[#3A3556] mb-3">➕ Ajouter une personne</p>
-          <div className="flex flex-wrap gap-3">
-            <select value={ajoutRole} onChange={(e) => setAjoutRole(e.target.value as RoleEleve | "")}
-              className="rounded-xl border border-[#E7E6EF] bg-white px-3 py-2 text-sm text-[#3A3556] outline-none focus:border-[#7C6BD6]">
-              <option value="">-- Rôle --</option>
-              {(["victime","intimidateur","temoin","lanceur_alerte"] as RoleEleve[]).map((r) => (
-                <option key={r} value={r}>{ROLE_CONFIG[r].label}</option>
-              ))}
-            </select>
-            <div className="flex-1 min-w-[200px]">
-              <ChampEleve placeholder="Rechercher un élève…"
-                onSelect={(el, txt) => { setAjoutEleve(el); setAjoutLibre(txt ?? ""); }}
-                allowFreeText={ajoutRole === "lanceur_alerte"} />
+        {peutCompleter && (
+          <div className="mt-5 border-t border-[#F3F2FA] pt-4">
+            <p className="text-sm font-medium text-[#3A3556] mb-3">➕ Ajouter une personne</p>
+            <div className="flex flex-wrap gap-3">
+              <select value={ajoutRole} onChange={(e) => setAjoutRole(e.target.value as RoleEleve | "")}
+                className="rounded-xl border border-[#E7E6EF] bg-white px-3 py-2 text-sm text-[#3A3556] outline-none focus:border-[#7C6BD6]">
+                <option value="">-- Rôle --</option>
+                {(["victime","intimidateur","temoin","lanceur_alerte"] as RoleEleve[]).map((r) => (
+                  <option key={r} value={r}>{ROLE_CONFIG[r].label}</option>
+                ))}
+              </select>
+              <div className="flex-1 min-w-[200px]">
+                <ChampEleve placeholder="Rechercher un élève…"
+                  onSelect={(el, txt) => { setAjoutEleve(el); setAjoutLibre(txt ?? ""); }}
+                  allowFreeText={ajoutRole === "lanceur_alerte"} />
+              </div>
+              <button onClick={handleAjouterActeur}
+                disabled={!ajoutRole || ajoutLoading || (!ajoutEleve && !ajoutLibre.trim())}
+                className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm font-medium text-white hover:bg-[#2A1E5C] transition disabled:opacity-40">
+                {ajoutLoading ? "…" : "Ajouter"}
+              </button>
             </div>
-            <button onClick={handleAjouterActeur}
-              disabled={!ajoutRole || ajoutLoading || (!ajoutEleve && !ajoutLibre.trim())}
-              className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm font-medium text-white hover:bg-[#2A1E5C] transition disabled:opacity-40">
-              {ajoutLoading ? "…" : "Ajouter"}
-            </button>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -495,9 +514,10 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh }: {
 /* ============================================================
    Carte créneau dépliable
    ============================================================ */
-function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh }: {
+function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh, peutCompleter, peutModifier }: {
   creneau: CreneauAgenda; situationId: string;
   acteurs: ActeurSituation[]; profile: Profile; onRefresh: () => void;
+  peutCompleter: boolean; peutModifier: boolean;
 }) {
   const [ouvert, setOuvert]       = useState(false);
   const [editingCR, setEditingCR] = useState(false);
@@ -507,7 +527,7 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
   const refRef     = creneau.referent_charge ?? creneau.referent;
   const couleurRef = refRef?.couleur ?? "#9A97AD";
   const hasCR      = !!creneau.cr;
-  const canEdit    = profile.role === "admin" || creneau.referent_id === profile.id || creneau.referent_charge_id === profile.id;
+  const canEdit    = peutModifier || (peutCompleter && (creneau.referent_id === profile.id || creneau.referent_charge_id === profile.id));
   const infosEleve = buildInfosEleve(creneau, acteurs);
   const dateStr    = formatDateLong(creneau.date_creneau);
 
@@ -537,7 +557,7 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
   const { ligne1, ligne2, couleurTexte, bg, bandeColor, icone } = getBandeauInfo();
 
   async function handleSaveCR() {
-    if (!contenu.trim()) return;
+    if (!contenu.trim() || !canEdit) return;
     setSaving(true);
     if (hasCR && creneau.cr) {
       await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", creneau.cr.id);
@@ -594,7 +614,7 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
 
       {ouvert && (
         <div className="border-t border-[#EEEDF5] bg-white px-5 py-5">
-          {editingCR ? (
+          {editingCR && canEdit ? (
             <div className="space-y-3">
               <p className="text-sm font-semibold text-[#1B1633]">{hasCR ? "Modifier le compte rendu" : "Rédiger le compte rendu"}</p>
               <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={7}
@@ -656,8 +676,9 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
 /* ============================================================
    ONGLET ENTRETIENS
    ============================================================ */
-function OngletEntretiens({ situationId, acteurs, profile, onRefresh }: {
+function OngletEntretiens({ situationId, acteurs, profile, onRefresh, peutCompleter, peutModifier }: {
   situationId: string; acteurs: ActeurSituation[]; profile: Profile; onRefresh: () => void;
+  peutCompleter: boolean; peutModifier: boolean;
 }) {
   const [creneaux, setCreneaux]               = useState<CreneauAgenda[]>([]);
   const [loadingCreneaux, setLoadingCreneaux] = useState(true);
@@ -709,7 +730,7 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh }: {
   useEffect(() => { loadCreneaux(); }, [loadCreneaux]);
 
   async function handleCreate() {
-    if (!newContenu.trim()) return;
+    if (!newContenu.trim() || !peutCompleter) return;
     if (newHeureFin <= newHeureDebut) { setCreateError("L'heure de fin doit être après l'heure de début."); return; }
     setCreating(true); setCreateError(null);
 
@@ -749,87 +770,90 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh }: {
           <div className="space-y-3">
             {creneaux.map((c) => (
               <CarteCreneauDepliable key={c.id} creneau={c} situationId={situationId}
-                acteurs={acteurs} profile={profile} onRefresh={loadCreneaux} />
+                acteurs={acteurs} profile={profile} onRefresh={loadCreneaux}
+                peutCompleter={peutCompleter} peutModifier={peutModifier} />
             ))}
           </div>
         )}
       </div>
 
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-3">Ajouter un entretien non planifié</p>
-        {!nouveau && (
-          <button onClick={() => setNouveau(true)}
-            className="flex items-center gap-2 rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5
-                       text-sm font-medium text-[#3A3556] hover:bg-[#F3F2FA] transition">
-            ＋ Saisir un entretien qui n'était pas dans l'agenda
-          </button>
-        )}
-        {nouveau && (
-          <div className="rounded-2xl border-2 border-[#7C6BD6] bg-white p-5 space-y-4">
-            <p className="text-sm font-semibold text-[#1B1633]">Entretien non planifié</p>
-            {createError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{createError}</div>}
-            <div>
-              <label className="block text-xs font-medium text-[#9A97AD] mb-1">Date de l'entretien</label>
-              <input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className={inputCls} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+      {peutCompleter && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-3">Ajouter un entretien non planifié</p>
+          {!nouveau && (
+            <button onClick={() => setNouveau(true)}
+              className="flex items-center gap-2 rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5
+                         text-sm font-medium text-[#3A3556] hover:bg-[#F3F2FA] transition">
+              ＋ Saisir un entretien qui n'était pas dans l'agenda
+            </button>
+          )}
+          {nouveau && (
+            <div className="rounded-2xl border-2 border-[#7C6BD6] bg-white p-5 space-y-4">
+              <p className="text-sm font-semibold text-[#1B1633]">Entretien non planifié</p>
+              {createError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{createError}</div>}
               <div>
-                <label className="block text-xs font-medium text-[#9A97AD] mb-1">Heure de début</label>
-                <input type="time" value={newHeureDebut} onChange={(e) => setNewHeureDebut(e.target.value)} className={inputCls} />
+                <label className="block text-xs font-medium text-[#9A97AD] mb-1">Date de l'entretien</label>
+                <input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className={inputCls} />
               </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#9A97AD] mb-1">Heure de début</label>
+                  <input type="time" value={newHeureDebut} onChange={(e) => setNewHeureDebut(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#9A97AD] mb-1">Heure de fin</label>
+                  <input type="time" value={newHeureFin} onChange={(e) => setNewHeureFin(e.target.value)} className={inputCls} />
+                </div>
+              </div>
+
+              {/* Élève interviewé */}
               <div>
-                <label className="block text-xs font-medium text-[#9A97AD] mb-1">Heure de fin</label>
-                <input type="time" value={newHeureFin} onChange={(e) => setNewHeureFin(e.target.value)} className={inputCls} />
+                <label className="block text-xs font-medium text-[#9A97AD] mb-1">
+                  Élève interviewé
+                </label>
+                <select
+                  value={newEleveId}
+                  onChange={(e) => setNewEleveId(e.target.value)}
+                  className={inputCls}
+                >
+                  <option value="">— Nom de l'élève concerné</option>
+                  {(["victime","intimidateur","temoin","lanceur_alerte"] as RoleEleve[]).flatMap((role) =>
+                    acteurs
+                      .filter((a) => a.eleve)
+                      .filter((a) => a.role === role)
+                      .map((a) => (
+                        <option key={a.id} value={a.eleve!.id}>
+                          {ROLE_CONFIG[role].icon} {a.eleve!.prenom} {a.eleve!.nom}
+                          {a.eleve!.classe ? ` (${a.eleve!.classe})` : ""}
+                          {" — "}{ROLE_CONFIG[role].label}
+                        </option>
+                      ))
+                  )}
+                </select>
+                <p className="mt-1 text-xs text-[#9A97AD]">
+                  Cette information enrichit le bandeau de l'entretien et le profil de l'élève.
+                </p>
+              </div>
+
+              <p className="text-xs text-[#9A97AD] -mt-2">ℹ️ Le créneau sera automatiquement ajouté à l'agenda.</p>
+              <div>
+                <label className="block text-xs font-medium text-[#9A97AD] mb-1">Compte rendu</label>
+                <textarea value={newContenu} onChange={(e) => setNewContenu(e.target.value)} rows={6}
+                  placeholder="Rédigez le compte rendu de l'entretien…" className={inputCls + " resize-none"} />
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => { setNouveau(false); setNewContenu(""); setNewEleveId(""); setCreateError(null); }}
+                  className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">Annuler</button>
+                <button onClick={handleCreate} disabled={creating || !newContenu.trim()}
+                  className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
+                  {creating ? "Enregistrement…" : "Enregistrer + ajouter à l'agenda"}
+                </button>
               </div>
             </div>
-
-            {/* Élève interviewé */}
-            <div>
-              <label className="block text-xs font-medium text-[#9A97AD] mb-1">
-                Élève interviewé
-              </label>
-              <select
-                value={newEleveId}
-                onChange={(e) => setNewEleveId(e.target.value)}
-                className={inputCls}
-              >
-                <option value="">— Nom de l'élève concerné</option>
-                {(["victime","intimidateur","temoin","lanceur_alerte"] as RoleEleve[]).flatMap((role) =>
-                  acteurs
-                    .filter((a) => a.eleve)
-                    .filter((a) => a.role === role)
-                    .map((a) => (
-                      <option key={a.id} value={a.eleve!.id}>
-                        {ROLE_CONFIG[role].icon} {a.eleve!.prenom} {a.eleve!.nom}
-                        {a.eleve!.classe ? ` (${a.eleve!.classe})` : ""}
-                        {" — "}{ROLE_CONFIG[role].label}
-                      </option>
-                    ))
-                )}
-              </select>
-              <p className="mt-1 text-xs text-[#9A97AD]">
-                Cette information enrichit le bandeau de l'entretien et le profil de l'élève.
-              </p>
-            </div>
-
-            <p className="text-xs text-[#9A97AD] -mt-2">ℹ️ Le créneau sera automatiquement ajouté à l'agenda.</p>
-            <div>
-              <label className="block text-xs font-medium text-[#9A97AD] mb-1">Compte rendu</label>
-              <textarea value={newContenu} onChange={(e) => setNewContenu(e.target.value)} rows={6}
-                placeholder="Rédigez le compte rendu de l'entretien…" className={inputCls + " resize-none"} />
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => { setNouveau(false); setNewContenu(""); setNewEleveId(""); setCreateError(null); }}
-                className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">Annuler</button>
-              <button onClick={handleCreate} disabled={creating || !newContenu.trim()}
-                className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
-                {creating ? "Enregistrement…" : "Enregistrer + ajouter à l'agenda"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -837,7 +861,9 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh }: {
 /* ============================================================
    ONGLET NOTES
    ============================================================ */
-function OngletNotes({ situationId, profile }: { situationId: string; profile: Profile }) {
+function OngletNotes({ situationId, profile, peutCompleter }: {
+  situationId: string; profile: Profile; peutCompleter: boolean;
+}) {
   const [notes, setNotes]       = useState<Note[]>([]);
   const [loading, setLoading]   = useState(true);
   const [contenu, setContenu]   = useState("");
@@ -855,27 +881,32 @@ function OngletNotes({ situationId, profile }: { situationId: string; profile: P
   useEffect(() => { loadNotes(); }, [loadNotes]);
 
   async function handleCreate() {
-    if (!contenu.trim()) return;
+    if (!contenu.trim() || !peutCompleter) return;
     setCreating(true);
     await supabase.from("comptes_rendus").insert({ situation_id: situationId, auteur_id: profile.id, contenu: `[NOTE] ${contenu.trim()}`, archive: false });
     setCreating(false); setContenu(""); await loadNotes();
   }
 
-  async function handleSupprimer(id: string) { await supabase.from("comptes_rendus").delete().eq("id", id); await loadNotes(); }
+  async function handleSupprimer(id: string) {
+    if (!peutCompleter) return;
+    await supabase.from("comptes_rendus").delete().eq("id", id); await loadNotes();
+  }
 
   if (loading) return <p className="py-8 text-center text-sm text-[#9A97AD]">Chargement…</p>;
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-3">
-        <p className="text-sm font-semibold text-[#1B1633]">Ajouter une note</p>
-        <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={4}
-          placeholder="Saisissez votre note, observation, information utile…" className={inputCls + " resize-none"} />
-        <button onClick={handleCreate} disabled={creating || !contenu.trim()}
-          className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
-          {creating ? "Enregistrement…" : "Ajouter la note"}
-        </button>
-      </div>
+      {peutCompleter && (
+        <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-3">
+          <p className="text-sm font-semibold text-[#1B1633]">Ajouter une note</p>
+          <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={4}
+            placeholder="Saisissez votre note, observation, information utile…" className={inputCls + " resize-none"} />
+          <button onClick={handleCreate} disabled={creating || !contenu.trim()}
+            className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
+            {creating ? "Enregistrement…" : "Ajouter la note"}
+          </button>
+        </div>
+      )}
       {notes.length === 0 ? <p className="py-8 text-center text-sm text-[#9A97AD]">Aucune note pour cette situation.</p> : (
         <div className="relative">
           <div className="absolute left-[17px] top-0 bottom-0 w-0.5 bg-[#EEEDF5]" />
@@ -894,7 +925,7 @@ function OngletNotes({ situationId, profile }: { situationId: string; profile: P
                         <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{note.contenu}</p>
                         <p className="mt-2 text-xs text-[#B4B1C4]">{note.auteur?.prenom} {note.auteur?.nom} · {formatDateHeure(note.created_at)}</p>
                       </div>
-                      {isAuteur && (
+                      {isAuteur && peutCompleter && (
                         <button onClick={() => handleSupprimer(note.id)} className="shrink-0 text-[#C4C2D4] hover:text-red-500 transition">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
@@ -1186,8 +1217,8 @@ function ModalFusion({ categorie, items, onClose, onSuccess }: {
 /* ============================================================
    ONGLET QUALIFICATIONS — Colonne catégorie
    ============================================================ */
-function ColonneCategorie({ categorie, situationId, profile }: {
-  categorie: CatKey; situationId: string; profile: Profile;
+function ColonneCategorie({ categorie, situationId, profile, peutCompleter }: {
+  categorie: CatKey; situationId: string; profile: Profile; peutCompleter: boolean;
 }) {
   const cfg = CAT_CONFIG[categorie];
   const [items, setItems]       = useState<RefItem[]>([]);
@@ -1210,6 +1241,7 @@ function ColonneCategorie({ categorie, situationId, profile }: {
   useEffect(() => { load(); }, [load]);
 
   async function handleToggle(itemId: string) {
+    if (!peutCompleter) return;
     setSaving(itemId);
     if (cochees.has(itemId)) {
       await supabase.from(cfg.liaisonTable).delete().eq("situation_id", situationId).eq(cfg.liaisonCol, itemId);
@@ -1255,10 +1287,11 @@ function ColonneCategorie({ categorie, situationId, profile }: {
             const enCours  = saving === item.id;
             return (
               <label key={item.id}
-                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 cursor-pointer transition
-                           ${estCoche ? "bg-[#F5F3FF]" : "hover:bg-[#F8F7FC]"}`}>
-                <CheckBox checked={estCoche} onChange={() => handleToggle(item.id)} loading={enCours} />
-                <input type="checkbox" className="sr-only" checked={estCoche} onChange={() => !enCours && handleToggle(item.id)} />
+                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition
+                           ${peutCompleter ? "cursor-pointer" : "cursor-default"}
+                           ${estCoche ? "bg-[#F5F3FF]" : peutCompleter ? "hover:bg-[#F8F7FC]" : ""}`}>
+                <CheckBox checked={estCoche} onChange={() => handleToggle(item.id)} loading={enCours} disabled={!peutCompleter} />
+                <input type="checkbox" className="sr-only" checked={estCoche} onChange={() => !enCours && handleToggle(item.id)} disabled={!peutCompleter} />
                 <span className={`text-sm transition ${estCoche ? "font-medium text-[#1B1633]" : "text-[#3A3556]"}`}>{item.label}</span>
               </label>
             );
@@ -1266,15 +1299,17 @@ function ColonneCategorie({ categorie, situationId, profile }: {
         </div>
 
         {/* Bouton + */}
-        <div className="border-t border-[#F3F2FA] px-4 py-3">
-          <button onClick={() => setModalAjout(true)}
-            className="flex w-full items-center gap-2 rounded-xl border border-dashed border-[#D1CFE2]
-                       px-3 py-2 text-xs font-medium text-[#6C6A80] hover:border-[#7C6BD6]
-                       hover:text-[#6656B8] transition">
-            <span className="text-base leading-none">＋</span>
-            Ajouter un {cfg.singulier}
-          </button>
-        </div>
+        {peutCompleter && (
+          <div className="border-t border-[#F3F2FA] px-4 py-3">
+            <button onClick={() => setModalAjout(true)}
+              className="flex w-full items-center gap-2 rounded-xl border border-dashed border-[#D1CFE2]
+                         px-3 py-2 text-xs font-medium text-[#6C6A80] hover:border-[#7C6BD6]
+                         hover:text-[#6656B8] transition">
+              <span className="text-base leading-none">＋</span>
+              Ajouter un {cfg.singulier}
+            </button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -1283,7 +1318,9 @@ function ColonneCategorie({ categorie, situationId, profile }: {
 /* ============================================================
    ONGLET QUALIFICATIONS
    ============================================================ */
-function OngletQualifications({ situationId, profile }: { situationId: string; profile: Profile }) {
+function OngletQualifications({ situationId, profile, peutCompleter }: {
+  situationId: string; profile: Profile; peutCompleter: boolean;
+}) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-[#6C6A80]">
@@ -1292,15 +1329,15 @@ function OngletQualifications({ situationId, profile }: { situationId: string; p
       </p>
       {/* 💻 PC — 3 colonnes */}
       <div className="hidden lg:grid grid-cols-3 gap-4">
-        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} />
-        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} />
-        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} />
+        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
+        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
+        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
       </div>
       {/* 📱 Mobile — 3 blocs empilés */}
       <div className="lg:hidden space-y-4">
-        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} />
-        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} />
-        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} />
+        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
+        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
+        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
       </div>
     </div>
   );
@@ -1318,8 +1355,14 @@ export default function FicheSituationPage() {
   const [acteurs, setActeurs]     = useState<ActeurSituation[]>([]);
   const [profile, setProfile]     = useState<Profile | null>(null);
   const [referents, setReferents] = useState<Referent[]>([]);
+  const [monNiveau, setMonNiveau] = useState<NiveauDroit>("lecture");
   const [loading, setLoading]     = useState(true);
   const [onglet, setOnglet]       = useState<OngletType>("infos");
+
+  // "modification" couvre le contrôle complet (les admins ont toujours ce niveau).
+  // "completion" (ou plus) permet d'ajouter du contenu (CR, notes, qualifications, acteurs).
+  const peutModifier  = monNiveau === "modification";
+  const peutCompleter = monNiveau === "completion" || monNiveau === "modification";
 
   const loadSituation = useCallback(async () => {
     const [sitRes, acteursRes] = await Promise.all([
@@ -1341,6 +1384,23 @@ export default function FicheSituationPage() {
       if (!user) { router.push("/login"); return; }
       const { data: prof } = await supabase.from("profiles").select("id, role").eq("id", user.id).single();
       setProfile(prof);
+
+      // Détermine le niveau d'accès réel de l'utilisateur sur cette situation.
+      // Les admins ont toujours un contrôle complet. Les référents dépendent de
+      // referent_situation_droits ; en l'absence de ligne on reste en lecture seule
+      // par précaution (RLS devrait de toute façon déjà bloquer l'accès sinon).
+      if (prof?.role === "admin") {
+        setMonNiveau("modification");
+      } else {
+        const { data: droit } = await supabase
+          .from("referent_situation_droits")
+          .select("niveau")
+          .eq("situation_id", situationId)
+          .eq("referent_id", user.id)
+          .maybeSingle();
+        setMonNiveau((droit?.niveau as NiveauDroit) ?? "lecture");
+      }
+
       const { data: refs } = await supabase.from("profiles").select("id, nom, prenom, couleur")
         .eq("role", "referent").eq("actif", true).order("nom");
       setReferents(refs ?? []);
@@ -1348,7 +1408,7 @@ export default function FicheSituationPage() {
       setLoading(false);
     }
     init();
-  }, [router, loadSituation]);
+  }, [router, loadSituation, situationId]);
 
   const ONGLETS: { key: OngletType; label: string }[] = [
     { key: "infos",           label: "Infos"          },
@@ -1368,15 +1428,17 @@ export default function FicheSituationPage() {
 
   const OngletContent = () => {
     if (onglet === "infos")
-      return <OngletInfos situation={situation} acteurs={acteurs} profile={profile} situationId={situationId} onRefresh={loadSituation} />;
+      return <OngletInfos situation={situation} acteurs={acteurs} profile={profile} situationId={situationId}
+        onRefresh={loadSituation} peutCompleter={peutCompleter} peutModifier={peutModifier} />;
     if (onglet === "entretiens")
-      return <OngletEntretiens situationId={situationId} acteurs={acteurs} profile={profile} onRefresh={loadSituation} />;
+      return <OngletEntretiens situationId={situationId} acteurs={acteurs} profile={profile}
+        onRefresh={loadSituation} peutCompleter={peutCompleter} peutModifier={peutModifier} />;
     if (onglet === "notes")
-      return <OngletNotes situationId={situationId} profile={profile} />;
+      return <OngletNotes situationId={situationId} profile={profile} peutCompleter={peutCompleter} />;
     if (onglet === "droits")
       return <OngletDroits situationId={situationId} profile={profile} allReferents={referents} />;
     if (onglet === "qualifications")
-      return <OngletQualifications situationId={situationId} profile={profile} />;
+      return <OngletQualifications situationId={situationId} profile={profile} peutCompleter={peutCompleter} />;
     return null;
   };
 
@@ -1409,6 +1471,9 @@ export default function FicheSituationPage() {
                 {STATUT_CONFIG[situation.statut].label}
               </span>
             </div>
+            {monNiveau === "lecture" && profile.role !== "admin" && (
+              <p className="mt-1.5 text-[11px] text-[#9A97AD]">🔒 Accès en lecture seule</p>
+            )}
           </div>
           <TabBar mobile />
         </header>
@@ -1424,6 +1489,9 @@ export default function FicheSituationPage() {
             <div>
               {situation.reference && <p className="text-xs font-mono text-[#9A97AD] mb-0.5">{situation.reference}</p>}
               <h1 className="text-2xl font-semibold text-[#1B1633]">{situation.titre}</h1>
+              {monNiveau === "lecture" && profile.role !== "admin" && (
+                <p className="mt-1 text-xs text-[#9A97AD]">🔒 Accès en lecture seule</p>
+              )}
             </div>
             <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium
                              ${STATUT_CONFIG[situation.statut].bg} ${STATUT_CONFIG[situation.statut].text}`}>
