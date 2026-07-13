@@ -483,6 +483,9 @@ function PanneauCRReunion({ creneau, profile, canWrite, onGlobalRefresh }: {
     if (cr) {
       await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", cr.id);
     } else {
+      // Le cast "as any" contourne un typage Supabase généré AVANT la migration
+      // (situation_id y est encore déclaré non-nullable). À retirer une fois
+      // les types régénérés via `supabase gen types typescript`.
       await supabase.from("comptes_rendus").insert({
         creneau_id:     creneau.id,
         situation_id:   null,
@@ -490,7 +493,7 @@ function PanneauCRReunion({ creneau, profile, canWrite, onGlobalRefresh }: {
         contenu:        contenu.trim(),
         date_entretien: creneau.date_creneau,
         archive:        false,
-      });
+      } as any);
     }
     setSaving(false);
     setEditing(false);

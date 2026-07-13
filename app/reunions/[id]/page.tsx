@@ -115,11 +115,14 @@ export default function ReunionDetailPage() {
     (reunion.participants ?? []).some((p) => p.id === profile.id);
 
   async function handleSave() {
-    if (!contenu.trim() || !profile) return;
+    if (!contenu.trim() || !profile || !reunion) return;
     setSaving(true);
     if (cr) {
       await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", cr.id);
     } else {
+      // Le cast "as any" contourne un typage Supabase généré AVANT la migration
+      // (situation_id y est encore déclaré non-nullable). À retirer une fois
+      // les types régénérés via `supabase gen types typescript`.
       await supabase.from("comptes_rendus").insert({
         creneau_id:     reunionId,
         situation_id:   null,
@@ -127,7 +130,7 @@ export default function ReunionDetailPage() {
         contenu:        contenu.trim(),
         date_entretien: reunion.date_creneau,
         archive:        false,
-      });
+      } as any);
     }
     setSaving(false);
     setEditing(false);
