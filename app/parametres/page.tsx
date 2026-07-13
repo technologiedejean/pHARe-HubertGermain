@@ -232,8 +232,7 @@ function Content({
                 : selected.size > 0
                   ? "border-[#dc2626] bg-red-100"
                   : "border-[#D1CFE2] bg-white"
-            }`}
-              onClick={toggleAll}>
+            }`}>
               {selected.size === ELEMENTS.length && (
                 <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
                   <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -270,8 +269,7 @@ function Content({
                 {/* Checkbox */}
                 <div className={`mt-0.5 h-5 w-5 shrink-0 rounded border-2 flex items-center justify-center transition ${
                   isSelected ? "border-[#dc2626] bg-[#dc2626]" : "border-[#D1CFE2] bg-white"
-                }`}
-                  onClick={() => toggleElement(element.id)}>
+                }`}>
                   {isSelected && (
                     <svg viewBox="0 0 10 10" width="10" height="10" fill="none">
                       <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
