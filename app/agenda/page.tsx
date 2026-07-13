@@ -29,6 +29,7 @@ type Creneau = {
   referent_charge?: Referent;
   situation?: Situation;
   eleve?: Eleve;
+  participants?: Referent[];
 };
 
 type Profile = {
@@ -98,13 +99,27 @@ function dureeEnMinutes(debut: string, fin: string): number {
   return Math.max(heureEnMinutes(fin) - heureEnMinutes(debut), 10);
 }
 
+// Couleurs de TOUS les référents impliqués dans le créneau : créateur,
+// référent en charge, et tous les participants additionnels.
 function couleursParticipants(creneau: Creneau, referents: Referent[]): string[] {
   const ids = new Set<string>();
   if (creneau.referent_id)        ids.add(creneau.referent_id);
   if (creneau.referent_charge_id) ids.add(creneau.referent_charge_id);
+  for (const p of creneau.participants ?? []) ids.add(p.id);
   return Array.from(ids)
     .map((id) => referents.find((r) => r.id === id)?.couleur)
     .filter(Boolean) as string[];
+}
+
+function nomsParticipants(creneau: Creneau, referents: Referent[]): string {
+  const ids = new Set<string>();
+  if (creneau.referent_charge_id) ids.add(creneau.referent_charge_id);
+  for (const p of creneau.participants ?? []) ids.add(p.id);
+  const noms = Array.from(ids)
+    .map((id) => referents.find((r) => r.id === id))
+    .filter(Boolean)
+    .map((r) => `${r!.prenom} ${r!.nom}`);
+  return noms.join(", ");
 }
 
 function styleMulticolore(couleurs: string[]): React.CSSProperties {
@@ -162,7 +177,8 @@ function CreneauBlock({
 
   const estParticipant =
     creneau.referent_id === profile.id ||
-    creneau.referent_charge_id === profile.id;
+    creneau.referent_charge_id === profile.id ||
+    (creneau.participants ?? []).some((p) => p.id === profile.id);
 
   let blockStyle: React.CSSProperties = { ...style };
 
@@ -185,11 +201,13 @@ function CreneauBlock({
 
   const textColor = creneau.a_cr ? "white" : "#1B1633";
   const label     = creneau.situation?.titre ?? creneau.titre ?? "Disponibilité";
+  const titleAttr = nomsParticipants(creneau, referents);
 
   return (
     <div
       className="relative rounded-lg overflow-hidden cursor-pointer select-none w-full h-full"
       style={{ ...blockStyle, transition: "filter 0.1s" }}
+      title={titleAttr || undefined}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={onClick}
@@ -445,11 +463,23 @@ function ModalCreneau({
     eleve_id:           creneau?.eleve_id                 ?? "",
     note:               creneau?.note                     ?? "",
     titre:              (creneau as any)?.titre           ?? "",
+    // Par défaut, le référent en charge est la personne connectée qui crée le créneau.
     referent_charge_id: creneau ? (creneau.referent_charge_id ?? "") : profile.id,
   });
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // ── Autres participants (au-delà du référent en charge) ──────────────
+  const [participants, setParticipants]         = useState<string[]>(
+    creneau?.participants?.map((p) => p.id) ?? []
+  );
+  const [showParticipants, setShowParticipants] = useState(false);
+  const autresReferents = referents.filter((r) => r.id !== profile.id);
+
+  function toggleParticipant(id: string) {
+    setParticipants((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  }
 
   function set(field: string, value: string) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -499,11 +529,28 @@ function ModalCreneau({
       referent_charge_id: form.referent_charge_id || null,
     };
 
-    const { error: err } = isEdit
-      ? await supabase.from("creneaux").update(payload).eq("id", creneau!.id)
-      : await supabase.from("creneaux").insert(payload);
+    async function syncParticipants(creneauId: string) {
+      // On repart de zéro à chaque sauvegarde : plus simple et fiable
+      // que de calculer un diff, et le volume de participants reste faible.
+      await supabase.from("creneau_participants").delete().eq("creneau_id", creneauId);
+      if (participants.length > 0) {
+        await supabase.from("creneau_participants").insert(
+          participants.map((referentId) => ({ creneau_id: creneauId, referent_id: referentId }))
+        );
+      }
+    }
 
-    if (err) { setError(err.message); setLoading(false); return; }
+    if (isEdit) {
+      const { error: err } = await supabase.from("creneaux").update(payload).eq("id", creneau!.id);
+      if (err) { setError(err.message); setLoading(false); return; }
+      await syncParticipants(creneau!.id);
+    } else {
+      const { data: nouveau, error: err } = await supabase
+        .from("creneaux").insert(payload).select("id").single();
+      if (err) { setError(err.message); setLoading(false); return; }
+      if (nouveau) await syncParticipants(nouveau.id);
+    }
+
     setLoading(false); onSuccess(); onClose();
   }
 
@@ -631,6 +678,67 @@ function ModalCreneau({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <button type="button" onClick={() => setShowParticipants((v) => !v)}
+              className="flex items-center gap-2 text-sm font-medium text-[#6656B8] hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!canEdit}>
+              <span className={`inline-block transition-transform ${showParticipants ? "rotate-90" : ""}`}>▸</span>
+              Autres participants
+              {participants.length > 0 && (
+                <span className="rounded-full bg-[#F5F3FF] px-2 py-0.5 text-xs text-[#6656B8]">{participants.length}</span>
+              )}
+            </button>
+
+            {showParticipants && (
+              <div className="mt-2 rounded-xl border border-[#E7E6EF] bg-[#F8F7FC] p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">Référents participants</p>
+                  <div className="flex gap-2">
+                    <button type="button" disabled={!canEdit}
+                      onClick={() => setParticipants(autresReferents.map((r) => r.id))}
+                      className="text-[10px] text-[#6656B8] hover:underline disabled:opacity-50">Tous</button>
+                    <span className="text-[#D1CFE2]">|</span>
+                    <button type="button" disabled={!canEdit}
+                      onClick={() => setParticipants([])}
+                      className="text-[10px] text-[#6656B8] hover:underline disabled:opacity-50">Aucun</button>
+                  </div>
+                </div>
+                {autresReferents.length === 0 ? (
+                  <p className="text-xs text-[#B4B1C4] italic">Aucun autre référent disponible.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                    {autresReferents.map((r) => {
+                      const coche = participants.includes(r.id);
+                      return (
+                        <label key={r.id} className={`flex items-center gap-2.5 ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-70"}`}>
+                          <div className="h-4 w-4 shrink-0 rounded border-2 transition flex items-center justify-center"
+                            style={{ backgroundColor: coche ? r.couleur : "white", borderColor: coche ? r.couleur : "#D1CFE2" }}>
+                            {coche && (
+                              <svg viewBox="0 0 10 10" width="8" height="8" fill="none">
+                                <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            )}
+                          </div>
+                          <input type="checkbox" className="sr-only" checked={coche} disabled={!canEdit}
+                            onChange={() => toggleParticipant(r.id)} />
+                          <span className="text-sm text-[#3A3556] flex-1 flex items-center gap-1.5">
+                            {r.prenom} {r.nom}
+                            {r.role === "admin" && (
+                              <span className="rounded-full bg-[#1A1440] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white">
+                                Admin
+                              </span>
+                            )}
+                          </span>
+                          <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: r.couleur }} />
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
@@ -855,7 +963,8 @@ export default function AgendaPage() {
           referent:profiles!creneaux_referent_id_fkey ( id, nom, prenom, couleur ),
           referent_charge:profiles!creneaux_referent_charge_id_fkey ( id, nom, prenom, couleur ),
           situation:situations ( id, titre, reference ),
-          eleve:eleves ( id, nom, prenom, classe )
+          eleve:eleves ( id, nom, prenom, classe ),
+          participants:creneau_participants ( referent:profiles ( id, nom, prenom, couleur ) )
         `)
         .order("date_creneau", { ascending: true, nullsFirst: false })
         .order("heure_debut"),
@@ -868,7 +977,11 @@ export default function AgendaPage() {
 
     if (creneauxRes.data) {
       const avecCR = new Set((crsRes.data ?? []).map((cr: any) => cr.creneau_id));
-      setCreneaux(creneauxRes.data.map((c: any) => ({ ...c, a_cr: avecCR.has(c.id) })));
+      setCreneaux(creneauxRes.data.map((c: any) => ({
+        ...c,
+        a_cr: avecCR.has(c.id),
+        participants: (c.participants ?? []).map((p: any) => p.referent).filter(Boolean),
+      })));
     }
   }, []);
 
