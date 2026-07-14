@@ -1,4 +1,4 @@
-// >>> NOUVEAU FICHIER : app/reunions/page.tsx <<<
+// >>> Ce fichier REMPLACE : app/reunions/page.tsx <<<
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
@@ -23,6 +23,7 @@ type Reunion = {
   referent_charge?: Referent | null;
   participants?: Referent[];
   a_cr?: boolean;
+  cr_non_lu?: boolean;
 };
 
 /* ============================================================
@@ -50,7 +51,7 @@ function Avatar({ r }: { r: Referent }) {
   );
 }
 
-function BadgeStatut({ statut, aCr }: { statut: Reunion["statut"]; aCr?: boolean }) {
+function BadgeStatut({ statut, aCr, nonLu }: { statut: Reunion["statut"]; aCr?: boolean; nonLu?: boolean }) {
   if (statut === "prevu") return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
       <span className="h-1.5 w-1.5 rounded-full bg-blue-500" /> Prévue
@@ -58,8 +59,12 @@ function BadgeStatut({ statut, aCr }: { statut: Reunion["statut"]; aCr?: boolean
   );
   if (statut === "realise") {
     return aCr ? (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+      <span className="relative inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> CR rédigé
+        {nonLu && (
+          <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"
+            title="Vous n'avez pas encore ouvert ce compte rendu" />
+        )}
       </span>
     ) : (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
@@ -82,6 +87,11 @@ export default function ReunionsPage() {
   const [crManquantOnly, setCrManquantOnly] = useState(false);
 
   const load = useCallback(async () => {
+    // On récupère l'utilisateur connecté directement ici (plutôt que de
+    // dépendre de l'état "profile", qui pourrait encore être null au premier
+    // appel de cette fonction mémoïsée).
+    const { data: { user } } = await supabase.auth.getUser();
+
     const [reuRes, crsRes] = await Promise.all([
       supabase
         .from("creneaux")
@@ -97,19 +107,40 @@ export default function ReunionsPage() {
         .order("heure_debut", { ascending: false }),
       supabase
         .from("comptes_rendus")
-        .select("creneau_id")
+        .select("id, creneau_id")
         .not("creneau_id", "is", null)
         .not("contenu", "like", "[NOTE]%"),
     ]);
 
-    if (reuRes.data) {
-      const avecCR = new Set((crsRes.data ?? []).map((cr: any) => cr.creneau_id));
-      setReunions(reuRes.data.map((r: any) => ({
-        ...r,
-        a_cr: avecCR.has(r.id),
-        participants: (r.participants ?? []).map((p: any) => p.referent).filter(Boolean),
-      })));
+    if (!reuRes.data) { setLoading(false); return; }
+
+    // Correspondance créneau → id du compte rendu.
+    const crParCreneau = new Map<string, string>();
+    for (const cr of (crsRes.data ?? [])) {
+      if (cr.creneau_id) crParCreneau.set(cr.creneau_id, cr.id);
     }
+    const crIds = Array.from(crParCreneau.values());
+
+    // Comptes rendus déjà lus par l'utilisateur connecté, parmi ceux existants.
+    let luSet = new Set<string>();
+    if (user && crIds.length > 0) {
+      const { data: lectures } = await supabase
+        .from("cr_lectures")
+        .select("compte_rendu_id")
+        .eq("referent_id", user.id)
+        .in("compte_rendu_id", crIds);
+      luSet = new Set((lectures ?? []).map((l: any) => l.compte_rendu_id));
+    }
+
+    setReunions(reuRes.data.map((r: any) => {
+      const crId = crParCreneau.get(r.id) ?? null;
+      return {
+        ...r,
+        a_cr: !!crId,
+        cr_non_lu: !!crId && !luSet.has(crId),
+        participants: (r.participants ?? []).map((p: any) => p.referent).filter(Boolean),
+      };
+    }));
     setLoading(false);
   }, []);
 
@@ -152,7 +183,7 @@ export default function ReunionsPage() {
               {formatDateCourt(r.date_creneau)} · {r.heure_debut.slice(0, 5)}–{r.heure_fin.slice(0, 5)}
             </p>
           </div>
-          <BadgeStatut statut={r.statut} aCr={r.a_cr} />
+          <BadgeStatut statut={r.statut} aCr={r.a_cr} nonLu={r.cr_non_lu} />
         </div>
         {participants.length > 0 && (
           <div className="flex items-center gap-1.5 mt-2">
@@ -192,7 +223,7 @@ export default function ReunionsPage() {
             </div>
           )}
         </td>
-        <td className="px-5 py-4"><BadgeStatut statut={r.statut} aCr={r.a_cr} /></td>
+        <td className="px-5 py-4"><BadgeStatut statut={r.statut} aCr={r.a_cr} nonLu={r.cr_non_lu} /></td>
       </tr>
     );
   };
