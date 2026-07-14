@@ -1,4 +1,4 @@
-// >>> NOUVEAU FICHIER : app/reunions/[id]/page.tsx <<<
+// >>> Ce fichier REMPLACE : app/reunions/[id]/page.tsx <<<
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
@@ -82,6 +82,28 @@ export default function ReunionDetailPage() {
       });
     }
     setCr(crRes.data as any);
+
+    // Cette page constitue "l'ouverture" du compte rendu : on marque
+    // immédiatement sa lecture pour l'utilisateur connecté, s'il ne l'avait
+    // pas déjà lu. La pastille "non lu" disparaîtra ensuite partout ailleurs
+    // (agenda, liste des réunions) pour cette personne uniquement.
+    if (crRes.data) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: dejaLu } = await supabase
+          .from("cr_lectures")
+          .select("compte_rendu_id")
+          .eq("compte_rendu_id", (crRes.data as any).id)
+          .eq("referent_id", user.id)
+          .maybeSingle();
+        if (!dejaLu) {
+          await supabase.from("cr_lectures").insert({
+            compte_rendu_id: (crRes.data as any).id,
+            referent_id: user.id,
+          });
+        }
+      }
+    }
   }, [reunionId]);
 
   useEffect(() => {

@@ -25,6 +25,8 @@ type Creneau = {
   situation_id: string | null;
   eleve_id: string | null;
   a_cr?: boolean;
+  cr_id?: string | null;
+  cr_non_lu?: boolean;
   referent?: Referent;
   referent_charge?: Referent;
   situation?: Situation;
@@ -54,14 +56,10 @@ const MOIS_LONGS   = [
   "Juillet","Août","Septembre","Octobre","Novembre","Décembre",
 ];
 
-// Valeur sentinelle utilisée dans le sélecteur "Type d'événement" pour
-// représenter le choix "Réunion / formation (sans situation)". Ce n'est
-// jamais stocké tel quel en base : quand elle est sélectionnée, situation_id
-// est enregistré à null.
 const REUNION_VALUE = "__reunion__";
 
 /* ============================================================
-   Helpers dates — heure LOCALE pour éviter le décalage UTC
+   Helpers dates
    ============================================================ */
 function dateToISO(d: Date): string {
   const y = d.getFullYear();
@@ -105,9 +103,6 @@ function dureeEnMinutes(debut: string, fin: string): number {
   return Math.max(heureEnMinutes(fin) - heureEnMinutes(debut), 10);
 }
 
-// Couleurs des référents réellement "responsables" du créneau : le référent
-// en charge et les participants additionnels. Le créateur (referent_id) n'a
-// aucune incidence sur la couleur s'il n'est pas lui-même en charge ou participant.
 function couleursParticipants(creneau: Creneau, referents: Referent[]): string[] {
   const ids = new Set<string>();
   if (creneau.referent_charge_id) ids.add(creneau.referent_charge_id);
@@ -191,10 +186,8 @@ function CreneauBlock({
   if (creneau.statut === "disponible") {
     blockStyle = { ...blockStyle, backgroundColor: "#F3F2FA", border: "1px solid #E7E6EF" };
   } else if (creneau.statut === "realise") {
-    // Réalisé → case PLEINE, remplie avec la ou les couleur(s) du/des référent(s) concerné(s)
     blockStyle = { ...blockStyle, ...styleMulticolore(couleurs), border: "none" };
   } else {
-    // Prévu → case ENCADRÉE (fond blanc, bordure colorée ; plusieurs liserés empilés si multicolore)
     blockStyle = {
       ...blockStyle,
       backgroundColor: "white",
@@ -210,8 +203,8 @@ function CreneauBlock({
   const textColor   = creneau.statut === "realise" ? "white" : "#1B1633";
   const label       = creneau.situation?.titre ?? creneau.titre ?? "Disponibilité";
   const titleAttr   = nomsParticipants(creneau, referents);
-  // Petit repère discret : entretien réalisé mais dont le compte rendu n'a pas encore été rédigé.
   const crManquant  = creneau.statut === "realise" && !creneau.a_cr;
+  const crNonLu     = !!creneau.cr_non_lu;
 
   return (
     <div
@@ -230,6 +223,10 @@ function CreneauBlock({
       {crManquant && (
         <div className="absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white"
           title="Compte rendu non rédigé" />
+      )}
+      {crNonLu && (
+        <div className="absolute top-0.5 left-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white"
+          title="Compte rendu non lu" />
       )}
       {hovered && (
         <div className="absolute top-0.5 right-0.5 flex gap-0.5 z-20" onClick={(e) => e.stopPropagation()}>
@@ -268,7 +265,6 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
 
   const creneauxDates = creneaux.filter((c) => c.date_creneau !== null);
 
-  /* ── Calcul des blocs avec clusters de chevauchement ────── */
   function getBlocs(iso: string) {
     const jour = creneauxDates
       .filter((c) => c.date_creneau === iso)
@@ -284,8 +280,6 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
       const debut = heureEnMinutes(c.heure_debut);
       const fin   = heureEnMinutes(c.heure_fin);
 
-      // Si ce créneau commence après la fin de tout le cluster précédent,
-      // on démarre un nouveau cluster et on réinitialise les colonnes
       if (debut >= clusterEnd) {
         clusterIdx++;
         colFins.length = 0;
@@ -298,7 +292,6 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
       blocs.push({ creneau: c, col, nbCols: 1, cluster: clusterIdx });
     }
 
-    // Calculer nbCols par cluster (= nb max de colonnes simultanées dans ce groupe)
     const clusterMaxCols = new Map<number, number>();
     for (const b of blocs) {
       const cur = clusterMaxCols.get(b.cluster) ?? 0;
@@ -321,7 +314,6 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
   return (
     <div className="overflow-x-auto rounded-2xl border border-[#EEEDF5] bg-white shadow-sm">
       <div className="min-w-[560px]" style={{ display: "grid", gridTemplateColumns: `48px repeat(7, 1fr)` }}>
-        {/* En-tête */}
         <div className="border-b border-[#EEEDF5] sticky top-0 bg-white z-10" />
         {jours.map((j, i) => {
           const iso     = dateToISO(j);
@@ -333,7 +325,6 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
             </div>
           );
         })}
-        {/* Colonne heures */}
         <div className="relative border-r border-[#EEEDF5]" style={{ height: totalPx, gridRow: 2 }}>
           {Array.from({ length: nbHeures + 1 }, (_, h) => (
             <div key={h} className="absolute w-full flex items-start justify-end pr-1" style={{ top: h * PX_PAR_HEURE - 7 }}>
@@ -341,7 +332,6 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
             </div>
           ))}
         </div>
-        {/* Colonnes jours */}
         {jours.map((j, i) => {
           const iso     = dateToISO(j);
           const isToday = iso === todayISO;
@@ -449,7 +439,8 @@ function VueMois({ moisRef, creneaux, referents, profile, onClickCreneau, onClic
 
 /* ============================================================
    Panneau compte rendu (créneau "réunion", sans situation)
-   Lecture ouverte à tous ; écriture réservée aux participants.
+   L'affichage de ce panneau constitue la "lecture" du CR pour
+   l'utilisateur connecté : on la marque dès que le contenu est chargé.
    ============================================================ */
 function PanneauCRReunion({ creneau, profile, canWrite, onGlobalRefresh }: {
   creneau: Creneau; profile: Profile; canWrite: boolean; onGlobalRefresh: () => void;
@@ -473,7 +464,23 @@ function PanneauCRReunion({ creneau, profile, canWrite, onGlobalRefresh }: {
       .maybeSingle();
     setCr(data as any);
     setLoadingCr(false);
-  }, [creneau.id]);
+
+    if (data) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: dejaLu } = await supabase
+          .from("cr_lectures")
+          .select("compte_rendu_id")
+          .eq("compte_rendu_id", data.id)
+          .eq("referent_id", user.id)
+          .maybeSingle();
+        if (!dejaLu) {
+          await supabase.from("cr_lectures").insert({ compte_rendu_id: data.id, referent_id: user.id });
+          onGlobalRefresh();
+        }
+      }
+    }
+  }, [creneau.id, onGlobalRefresh]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -483,9 +490,6 @@ function PanneauCRReunion({ creneau, profile, canWrite, onGlobalRefresh }: {
     if (cr) {
       await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", cr.id);
     } else {
-      // Le cast "as any" contourne un typage Supabase généré AVANT la migration
-      // (situation_id y est encore déclaré non-nullable). À retirer une fois
-      // les types régénérés via `supabase gen types typescript`.
       await supabase.from("comptes_rendus").insert({
         creneau_id:     creneau.id,
         situation_id:   null,
@@ -588,28 +592,22 @@ function ModalCreneau({
     eleve_id:           creneau?.eleve_id                 ?? "",
     note:               creneau?.note                     ?? "",
     titre:              (creneau as any)?.titre           ?? "",
-    // Par défaut, le référent en charge est la personne connectée qui crée le créneau.
     referent_charge_id: creneau ? (creneau.referent_charge_id ?? "") : profile.id,
   });
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // ── Autres participants (au-delà du référent en charge) ──────────────
   const [participants, setParticipants]         = useState<string[]>(
     creneau?.participants?.map((p) => p.id) ?? []
   );
   const [showParticipants, setShowParticipants] = useState(false);
-  // La liste des "autres participants" proposés exclut toujours le référent
-  // actuellement désigné comme "en charge" — il n'a pas à apparaître deux fois.
   const autresReferents = referents.filter((r) => r.id !== form.referent_charge_id);
 
   function toggleParticipant(id: string) {
     setParticipants((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
   }
 
-  // Si le référent en charge change et qu'il était précédemment coché comme
-  // participant, on le décoche automatiquement : il ne peut pas être les deux à la fois.
   useEffect(() => {
     if (form.referent_charge_id) {
       setParticipants((prev) => prev.filter((id) => id !== form.referent_charge_id));
@@ -623,9 +621,6 @@ function ModalCreneau({
   const hasSituation      = !!form.situation_id;
   const elevesDisponibles = hasSituation ? (elevesMap.get(form.situation_id) ?? []) : [];
 
-  // Qui a le droit de lire/rédiger le compte rendu de cette réunion :
-  // référent en charge, participants additionnels, ou admin. Basé sur l'état
-  // déjà enregistré du créneau (pas sur des modifications non sauvegardées).
   const canWriteCR = !!creneau && (
     profile.role === "admin" ||
     creneau.referent_charge_id === profile.id ||
@@ -642,9 +637,6 @@ function ModalCreneau({
     }
     setLoading(true); setError(null);
 
-    // Le créateur (referent_id) doit TOUJOURS être la personne réellement
-    // connectée — jamais la personne choisie dans "Référent en charge".
-    // On relit l'identité en direct pour éviter toute valeur obsolète.
     let createurId = profile.id;
     if (!isEdit) {
       const { data: authData, error: authErr } = await supabase.auth.getUser();
@@ -665,17 +657,11 @@ function ModalCreneau({
       eleve_id:           form.eleve_id      || null,
       note:               form.note          || null,
       titre:              hasSituation ? null : (form.titre.trim() || null),
-      // En modification, on conserve le créateur d'origine du créneau.
-      // En création, c'est toujours la personne connectée — le champ
-      // "Référent en charge" (form.referent_charge_id) ne détermine que
-      // qui est ASSIGNÉ, jamais qui est le créateur.
       referent_id:        creneau ? creneau.referent_id : createurId,
       referent_charge_id: form.referent_charge_id || null,
     };
 
     async function syncParticipants(creneauId: string) {
-      // On repart de zéro à chaque sauvegarde : plus simple et fiable
-      // que de calculer un diff, et le volume de participants reste faible.
       await supabase.from("creneau_participants").delete().eq("creneau_id", creneauId);
       if (participants.length > 0) {
         await supabase.from("creneau_participants").insert(
@@ -905,7 +891,6 @@ function ModalCreneau({
               className={inputCls + " resize-none"} disabled={!canEdit} />
           </div>
 
-          {/* Compte rendu — uniquement pour les réunions déjà enregistrées (pas de situation) */}
           {!hasSituation && !isTache && (
             isEdit ? (
               <PanneauCRReunion creneau={creneau!} profile={profile} canWrite={canWriteCR} onGlobalRefresh={onSuccess} />
@@ -1122,6 +1107,8 @@ export default function AgendaPage() {
   const [tachePlanifier, setTachePlanifier]   = useState<Creneau | null>(null);
 
   const loadCreneaux = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+
     const [creneauxRes, crsRes] = await Promise.all([
       supabase
         .from("creneaux")
@@ -1138,19 +1125,39 @@ export default function AgendaPage() {
         .order("heure_debut"),
       supabase
         .from("comptes_rendus")
-        .select("creneau_id")
+        .select("id, creneau_id")
         .not("creneau_id", "is", null)
         .not("contenu", "like", "[NOTE]%"),
     ]);
 
-    if (creneauxRes.data) {
-      const avecCR = new Set((crsRes.data ?? []).map((cr: any) => cr.creneau_id));
-      setCreneaux(creneauxRes.data.map((c: any) => ({
-        ...c,
-        a_cr: avecCR.has(c.id),
-        participants: (c.participants ?? []).map((p: any) => p.referent).filter(Boolean),
-      })));
+    if (!creneauxRes.data) return;
+
+    const crParCreneau = new Map<string, string>();
+    for (const cr of (crsRes.data ?? [])) {
+      if (cr.creneau_id) crParCreneau.set(cr.creneau_id, cr.id);
     }
+    const crIds = Array.from(crParCreneau.values());
+
+    let luSet = new Set<string>();
+    if (user && crIds.length > 0) {
+      const { data: lectures } = await supabase
+        .from("cr_lectures")
+        .select("compte_rendu_id")
+        .eq("referent_id", user.id)
+        .in("compte_rendu_id", crIds);
+      luSet = new Set((lectures ?? []).map((l: any) => l.compte_rendu_id));
+    }
+
+    setCreneaux(creneauxRes.data.map((c: any) => {
+      const crId = crParCreneau.get(c.id) ?? null;
+      return {
+        ...c,
+        a_cr: !!crId,
+        cr_id: crId,
+        cr_non_lu: !!crId && !luSet.has(crId),
+        participants: (c.participants ?? []).map((p: any) => p.referent).filter(Boolean),
+      };
+    }));
   }, []);
 
   useEffect(() => {
@@ -1190,11 +1197,6 @@ export default function AgendaPage() {
   const taches         = creneaux.filter((c) => !c.date_creneau);
   const creneauxDates  = creneaux.filter((c) => !!c.date_creneau);
 
-  // Un événement reste visible dès qu'AU MOINS UN des référents impliqués
-  // (référent en charge OU l'un des participants additionnels) est coché
-  // dans le panneau de filtres. Il ne disparaît que si tous les référents
-  // impliqués ont été décochés. S'il n'a aucun référent identifiable
-  // (ni en charge, ni participant reconnu), il dépend du filtre "Sans référent".
   const creneauxFiltres = creneauxDates.filter((c) => {
     const idsImpliques = new Set<string>();
     if (c.referent_charge_id && referents.some((r) => r.id === c.referent_charge_id)) {
@@ -1338,6 +1340,12 @@ export default function AgendaPage() {
           <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white" />
         </span>
         CR non rédigé
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="relative inline-block h-3.5 w-3.5 rounded bg-[#6656B8]">
+          <span className="absolute -top-0.5 -left-0.5 h-2 w-2 rounded-full bg-red-500 ring-1 ring-white" />
+        </span>
+        CR non lu (par vous)
       </div>
     </div>
   );
