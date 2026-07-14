@@ -40,6 +40,11 @@ type Stats = {
   entretiens_a_venir: number;
 };
 
+type NonLus = {
+  situations: boolean;
+  reunions: boolean;
+};
+
 /* ============================================================
    Navigation
    ============================================================ */
@@ -79,6 +84,16 @@ function isDemain(iso: string): boolean {
   const demain = new Date();
   demain.setDate(demain.getDate() + 1);
   return iso === demain.toISOString().slice(0, 10);
+}
+
+// Un lien de menu affiche-t-il la pastille "non lu" ? "Agenda" agrège les deux
+// types de compte rendu puisque les deux y sont consultables (situations
+// via l'onglet Entretiens de chaque fiche, réunions directement dans la modale).
+function aDesNonLus(href: string, nonLus: NonLus): boolean {
+  if (href === "/situations") return nonLus.situations;
+  if (href === "/reunions")   return nonLus.reunions;
+  if (href === "/agenda")     return nonLus.situations || nonLus.reunions;
+  return false;
 }
 
 /* ============================================================
@@ -209,6 +224,7 @@ export default function DashboardPage() {
   const [profile, setProfile]       = useState<Profile | null>(null);
   const [stats, setStats]           = useState<Stats>({ signalees: -1, en_cours: -1, traitees: -1, entretiens_a_venir: -1 });
   const [creneaux, setCreneaux]     = useState<Creneau[]>([]);
+  const [nonLus, setNonLus]         = useState<NonLus>({ situations: false, reunions: false });
   const [loading, setLoading]       = useState(true);
   const [menuOpen, setMenuOpen]     = useState(false);
 
@@ -238,7 +254,7 @@ export default function DashboardPage() {
       // Statistiques situations
       const today = new Date().toISOString().slice(0, 10);
 
-      const [sigRes, enCRes, traRes, agendaRes] = await Promise.all([
+      const [sigRes, enCRes, traRes, agendaRes, crsRes] = await Promise.all([
         supabase.from("situations").select("id", { count: "exact", head: true }).eq("statut", "ouverte"),
         supabase.from("situations").select("id", { count: "exact", head: true }).eq("statut", "en_cours"),
         supabase.from("situations").select("id", { count: "exact", head: true }).eq("statut", "cloturee"),
@@ -256,6 +272,13 @@ export default function DashboardPage() {
           .order("date_creneau")
           .order("heure_debut")
           .limit(20),
+        // Tous les comptes rendus visibles par l'utilisateur (la RLS limite déjà
+        // aux situations auxquelles il a accès). situation_id distingue le type :
+        // non-null = entretien de situation, null = réunion.
+        supabase
+          .from("comptes_rendus")
+          .select("id, situation_id")
+          .not("contenu", "like", "[NOTE]%"),
       ]);
 
       // Compter les entretiens à venir (statut "prevu")
@@ -269,6 +292,23 @@ export default function DashboardPage() {
       });
 
       setCreneaux((agendaRes.data as any) ?? []);
+
+      // Croise avec les comptes rendus déjà lus par cet utilisateur pour
+      // savoir si une pastille "non lu" doit apparaître sur le menu.
+      const crIds = (crsRes.data ?? []).map((c: any) => c.id);
+      let luSet = new Set<string>();
+      if (crIds.length > 0) {
+        const { data: lectures } = await supabase
+          .from("cr_lectures")
+          .select("compte_rendu_id")
+          .eq("referent_id", user.id)
+          .in("compte_rendu_id", crIds);
+        luSet = new Set((lectures ?? []).map((l: any) => l.compte_rendu_id));
+      }
+      const nonLusSituations = (crsRes.data ?? []).some((c: any) => c.situation_id !== null && !luSet.has(c.id));
+      const nonLusReunions   = (crsRes.data ?? []).some((c: any) => c.situation_id === null && !luSet.has(c.id));
+      setNonLus({ situations: nonLusSituations, reunions: nonLusReunions });
+
       setLoading(false);
     }
     load();
@@ -446,9 +486,12 @@ export default function DashboardPage() {
             </div>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              className="flex h-8 w-8 flex-col items-center justify-center gap-1.5"
+              className="relative flex h-8 w-8 flex-col items-center justify-center gap-1.5"
               aria-label="Menu"
             >
+              {(nonLus.situations || nonLus.reunions) && !menuOpen && (
+                <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />
+              )}
               <span className={`block h-0.5 w-5 bg-[#1B1633] transition-all
                                ${menuOpen ? "translate-y-2 rotate-45" : ""}`} />
               <span className={`block h-0.5 w-5 bg-[#1B1633] transition-all
@@ -469,7 +512,11 @@ export default function DashboardPage() {
                     className="flex items-center gap-3 rounded-xl px-4 py-3 text-sm
                                font-medium text-[#3A3556] hover:bg-[#F3F2FA]"
                     onClick={() => setMenuOpen(false)}>
-                    <span>{item.icon}</span>{item.label}
+                    <span>{item.icon}</span>
+                    <span className="flex-1">{item.label}</span>
+                    {aDesNonLus(item.href, nonLus) && (
+                      <span className="h-2 w-2 rounded-full bg-red-500" title="Contenu non lu" />
+                    )}
                   </a>
                 </li>
               ))}
@@ -518,7 +565,10 @@ export default function DashboardPage() {
                                  ? "bg-[#F3F2FA] text-[#6656B8]"
                                  : "text-[#3A3556] hover:bg-[#F3F2FA]"}`}>
                     <span className="text-base">{item.icon}</span>
-                    {item.label}
+                    <span className="flex-1">{item.label}</span>
+                    {aDesNonLus(item.href, nonLus) && (
+                      <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" title="Contenu non lu" />
+                    )}
                   </a>
                 </li>
               ))}
