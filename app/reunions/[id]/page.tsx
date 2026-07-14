@@ -43,6 +43,128 @@ function Avatar({ r, size = "sm" }: { r: Referent; size?: "sm" | "md" }) {
   );
 }
 
+const inputCls =
+  "w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm text-[#1B1633] outline-none " +
+  "transition placeholder:text-[#B4B1C4] focus:border-[#7C6BD6] focus:ring-4 focus:ring-[#7C6BD6]/15";
+
+/* ============================================================
+   Infos de la réunion
+   (Composant HORS du render de la page pour garder une identité stable
+   entre les rendus — sinon les enfants, dont le textarea du CR, seraient
+   démontés/remontés à chaque frappe.)
+   ============================================================ */
+function InfosReunion({ reunion, tousParticipants, onAllerAgenda }: {
+  reunion: Reunion;
+  tousParticipants: Referent[];
+  onAllerAgenda: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold text-[#1B1633]">{reunion.titre}</h2>
+        <p className="text-sm text-[#6C6A80] mt-1 capitalize">{formatDateLongue(reunion.date_creneau)}</p>
+        <p className="text-sm text-[#6C6A80]">{reunion.heure_debut.slice(0, 5)} – {reunion.heure_fin.slice(0, 5)}</p>
+      </div>
+      {reunion.note && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-1">Note</p>
+          <p className="text-sm text-[#3A3556] whitespace-pre-wrap">{reunion.note}</p>
+        </div>
+      )}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-2">Participants</p>
+        {tousParticipants.length === 0 ? (
+          <p className="text-sm text-[#B4B1C4] italic">Aucun participant renseigné.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {tousParticipants.map((p) => (
+              <div key={p.id} className="flex items-center gap-1.5 rounded-full border border-[#E7E6EF] bg-[#F8F7FC] px-2.5 py-1">
+                <Avatar r={p} />
+                <span className="text-sm text-[#1B1633]">{p.prenom} {p.nom}</span>
+                {reunion.referent_charge_id === p.id && (
+                  <span className="rounded-full bg-[#F5F3FF] px-1.5 py-0.5 text-[9px] font-semibold text-[#6656B8]">En charge</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <button onClick={onAllerAgenda} className="text-xs text-[#6656B8] hover:underline">
+        Modifier l'horaire ou les participants depuis l'agenda →
+      </button>
+    </div>
+  );
+}
+
+/* ============================================================
+   Panneau compte rendu
+   (Idem : composant hors du render de la page.)
+   ============================================================ */
+function PanneauCR({
+  cr, editing, canWrite, contenu, setContenu, saving,
+  onStartEdit, onCancelEdit, onSave,
+}: {
+  cr: CompteRendu | null;
+  editing: boolean;
+  canWrite: boolean;
+  contenu: string;
+  setContenu: (v: string) => void;
+  saving: boolean;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">Compte rendu</p>
+      {editing && canWrite ? (
+        <div className="space-y-3">
+          <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={8}
+            placeholder="Rédigez le compte rendu de cette réunion…" className={inputCls + " resize-none"} autoFocus />
+          <div className="flex gap-3">
+            <button onClick={onCancelEdit}
+              className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">
+              Annuler
+            </button>
+            <button onClick={onSave} disabled={saving || !contenu.trim()}
+              className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
+              {saving ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        </div>
+      ) : cr ? (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-[#9A97AD]">
+              {cr.auteur?.prenom} {cr.auteur?.nom} · {new Date(cr.created_at).toLocaleDateString("fr-FR")}
+              {cr.updated_at !== cr.created_at && " (modifié)"}
+            </p>
+            {canWrite && (
+              <button onClick={onStartEdit}
+                className="rounded-xl border border-[#E7E6EF] px-3 py-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition">
+                ✏️ Modifier
+              </button>
+            )}
+          </div>
+          <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{cr.contenu}</p>
+        </div>
+      ) : (
+        <div className="text-center py-4">
+          <p className="text-sm text-[#9A97AD] mb-3">Aucun compte rendu rédigé pour cette réunion.</p>
+          {canWrite ? (
+            <button onClick={onStartEdit}
+              className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm font-medium text-white hover:bg-[#2A1E5C] transition">
+              ✏️ Rédiger le compte rendu
+            </button>
+          ) : (
+            <p className="text-xs text-[#B4B1C4] italic">Seuls les participants de cette réunion peuvent rédiger ce compte rendu.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================
    Page principale
    ============================================================ */
@@ -97,10 +219,13 @@ export default function ReunionDetailPage() {
           .eq("referent_id", user.id)
           .maybeSingle();
         if (!dejaLu) {
-          await supabase.from("cr_lectures").insert({
+          const { error } = await supabase.from("cr_lectures").insert({
             compte_rendu_id: (crRes.data as any).id,
             referent_id: user.id,
           });
+          if (error) {
+            console.error("Impossible d'enregistrer la lecture du compte rendu :", error);
+          }
         }
       }
     }
@@ -159,97 +284,6 @@ export default function ReunionDetailPage() {
     await load();
   }
 
-  const inputCls =
-    "w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm text-[#1B1633] outline-none " +
-    "transition placeholder:text-[#B4B1C4] focus:border-[#7C6BD6] focus:ring-4 focus:ring-[#7C6BD6]/15";
-
-  const InfosReunion = () => (
-    <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-4">
-      <div>
-        <h2 className="text-xl font-semibold text-[#1B1633]">{reunion.titre}</h2>
-        <p className="text-sm text-[#6C6A80] mt-1 capitalize">{formatDateLongue(reunion.date_creneau)}</p>
-        <p className="text-sm text-[#6C6A80]">{reunion.heure_debut.slice(0, 5)} – {reunion.heure_fin.slice(0, 5)}</p>
-      </div>
-      {reunion.note && (
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-1">Note</p>
-          <p className="text-sm text-[#3A3556] whitespace-pre-wrap">{reunion.note}</p>
-        </div>
-      )}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-2">Participants</p>
-        {tousParticipants.length === 0 ? (
-          <p className="text-sm text-[#B4B1C4] italic">Aucun participant renseigné.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {tousParticipants.map((p) => (
-              <div key={p.id} className="flex items-center gap-1.5 rounded-full border border-[#E7E6EF] bg-[#F8F7FC] px-2.5 py-1">
-                <Avatar r={p} />
-                <span className="text-sm text-[#1B1633]">{p.prenom} {p.nom}</span>
-                {reunion.referent_charge_id === p.id && (
-                  <span className="rounded-full bg-[#F5F3FF] px-1.5 py-0.5 text-[9px] font-semibold text-[#6656B8]">En charge</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      <button onClick={() => router.push("/agenda")} className="text-xs text-[#6656B8] hover:underline">
-        Modifier l'horaire ou les participants depuis l'agenda →
-      </button>
-    </div>
-  );
-
-  const PanneauCR = () => (
-    <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">Compte rendu</p>
-      {editing && canWrite ? (
-        <div className="space-y-3">
-          <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={8}
-            placeholder="Rédigez le compte rendu de cette réunion…" className={inputCls + " resize-none"} autoFocus />
-          <div className="flex gap-3">
-            <button onClick={() => { setEditing(false); setContenu(cr?.contenu ?? ""); }}
-              className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">
-              Annuler
-            </button>
-            <button onClick={handleSave} disabled={saving || !contenu.trim()}
-              className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
-              {saving ? "Enregistrement…" : "Enregistrer"}
-            </button>
-          </div>
-        </div>
-      ) : cr ? (
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-[#9A97AD]">
-              {cr.auteur?.prenom} {cr.auteur?.nom} · {new Date(cr.created_at).toLocaleDateString("fr-FR")}
-              {cr.updated_at !== cr.created_at && " (modifié)"}
-            </p>
-            {canWrite && (
-              <button onClick={() => { setEditing(true); setContenu(cr.contenu); }}
-                className="rounded-xl border border-[#E7E6EF] px-3 py-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition">
-                ✏️ Modifier
-              </button>
-            )}
-          </div>
-          <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{cr.contenu}</p>
-        </div>
-      ) : (
-        <div className="text-center py-4">
-          <p className="text-sm text-[#9A97AD] mb-3">Aucun compte rendu rédigé pour cette réunion.</p>
-          {canWrite ? (
-            <button onClick={() => { setEditing(true); setContenu(""); }}
-              className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm font-medium text-white hover:bg-[#2A1E5C] transition">
-              ✏️ Rédiger le compte rendu
-            </button>
-          ) : (
-            <p className="text-xs text-[#B4B1C4] italic">Seuls les participants de cette réunion peuvent rédiger ce compte rendu.</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-[#FBFBFD] text-[#1B1633]">
 
@@ -261,8 +295,13 @@ export default function ReunionDetailPage() {
           </button>
         </header>
         <main className="flex-1 px-5 py-5 space-y-4">
-          <InfosReunion />
-          <PanneauCR />
+          <InfosReunion reunion={reunion} tousParticipants={tousParticipants} onAllerAgenda={() => router.push("/agenda")} />
+          <PanneauCR
+            cr={cr} editing={editing} canWrite={canWrite} contenu={contenu} setContenu={setContenu} saving={saving}
+            onStartEdit={() => { setEditing(true); setContenu(cr?.contenu ?? ""); }}
+            onCancelEdit={() => { setEditing(false); setContenu(cr?.contenu ?? ""); }}
+            onSave={handleSave}
+          />
         </main>
       </div>
 
@@ -272,8 +311,13 @@ export default function ReunionDetailPage() {
           ← Retour aux réunions
         </button>
         <div className="space-y-6">
-          <InfosReunion />
-          <PanneauCR />
+          <InfosReunion reunion={reunion} tousParticipants={tousParticipants} onAllerAgenda={() => router.push("/agenda")} />
+          <PanneauCR
+            cr={cr} editing={editing} canWrite={canWrite} contenu={contenu} setContenu={setContenu} saving={saving}
+            onStartEdit={() => { setEditing(true); setContenu(cr?.contenu ?? ""); }}
+            onCancelEdit={() => { setEditing(false); setContenu(cr?.contenu ?? ""); }}
+            onSave={handleSave}
+          />
         </div>
       </div>
     </div>
