@@ -32,6 +32,7 @@ type CompteRendu = {
   date_entretien: string | null; archive: boolean;
   created_at: string; updated_at: string; auteur_id: string;
   auteur?: { id: string; nom: string; prenom: string; couleur: string };
+  lu?: boolean;
 };
 
 type CreneauAgenda = {
@@ -513,6 +514,9 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh, peut
 
 /* ============================================================
    Carte créneau dépliable
+   Une pastille rouge signale, sur l'en-tête replié, un compte rendu
+   existant que l'utilisateur connecté n'a pas encore ouvert. Elle
+   disparaît (pour lui uniquement) dès qu'il déplie la carte.
    ============================================================ */
 function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh, peutCompleter, peutModifier }: {
   creneau: CreneauAgenda; situationId: string;
@@ -523,13 +527,36 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
   const [editingCR, setEditingCR] = useState(false);
   const [contenu, setContenu]     = useState(creneau.cr?.contenu ?? "");
   const [saving, setSaving]       = useState(false);
+  const [luLocal, setLuLocal]     = useState<boolean>(creneau.cr?.lu ?? true);
+
+  useEffect(() => {
+    setLuLocal(creneau.cr?.lu ?? true);
+  }, [creneau.cr?.id, creneau.cr?.lu]);
 
   const refRef     = creneau.referent_charge ?? creneau.referent;
   const couleurRef = refRef?.couleur ?? "#9A97AD";
   const hasCR      = !!creneau.cr;
+  const nonLu      = hasCR && !luLocal;
   const canEdit    = peutModifier || (peutCompleter && (creneau.referent_id === profile.id || creneau.referent_charge_id === profile.id));
   const infosEleve = buildInfosEleve(creneau, acteurs);
   const dateStr    = formatDateLong(creneau.date_creneau);
+
+  async function marquerCommeLu() {
+    if (!creneau.cr) return;
+    setLuLocal(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("cr_lectures").upsert(
+      { compte_rendu_id: creneau.cr.id, referent_id: user.id },
+      { onConflict: "compte_rendu_id,referent_id", ignoreDuplicates: true }
+    );
+  }
+
+  function toggleOuvert() {
+    const enTrainDouvrir = !ouvert;
+    setOuvert(enTrainDouvrir);
+    if (enTrainDouvrir && nonLu) marquerCommeLu();
+  }
 
   function getBandeauInfo() {
     const aujourd_hui = new Date().toISOString().slice(0, 10);
@@ -576,10 +603,16 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
       <div className="flex">
         <div className="w-1.5 shrink-0" style={{ backgroundColor: bandeColor }} />
         <div className="flex-1 cursor-pointer select-none" style={{ backgroundColor: bg }}
-          onClick={() => setOuvert((v) => !v)}>
+          onClick={toggleOuvert}>
           <div className="flex items-start justify-between gap-3 px-4 py-4">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium leading-snug" style={{ color: couleurTexte }}>{icone} {ligne1}</p>
+              <p className="text-sm font-medium leading-snug" style={{ color: couleurTexte }}>
+                {icone} {ligne1}
+                {nonLu && (
+                  <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-red-500 align-middle"
+                    title="Compte rendu non lu" />
+                )}
+              </p>
               {ligne2 && <p className="mt-0.5 text-xs font-medium" style={{ color: couleurTexte, opacity: 0.8 }}>{ligne2}</p>}
               <p className="mt-1 text-xs text-[#6C6A80]">{creneau.heure_debut.slice(0, 5)} – {creneau.heure_fin.slice(0, 5)}</p>
               {creneau.note && <p className="mt-0.5 text-xs text-[#9A97AD] italic">{creneau.note}</p>}
@@ -595,7 +628,7 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
                 </div>
               )}
               {canEdit && (
-                <button onClick={(e) => { e.stopPropagation(); setOuvert(true); setEditingCR(true); setContenu(creneau.cr?.contenu ?? ""); }}
+                <button onClick={(e) => { e.stopPropagation(); setOuvert(true); setEditingCR(true); setContenu(creneau.cr?.contenu ?? ""); if (nonLu) marquerCommeLu(); }}
                   className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E7E6EF]
                              bg-white text-[#6C6A80] hover:text-[#6656B8] hover:border-[#7C6BD6] transition"
                   title={hasCR ? "Modifier le compte rendu" : "Rédiger le compte rendu"}>
@@ -721,9 +754,26 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, peutComple
       if (cr.date_entretien && !cr.creneau_id) crParDate.set(cr.date_entretien, cr);
     }
 
-    setCreneaux(creneauxData.map((c: any) => ({
-      ...c, cr: crParCreneauId.get(c.id) ?? crParDate.get(c.date_creneau) ?? null,
-    })));
+    // Statut de lecture (par utilisateur connecté) de chaque compte rendu existant.
+    const { data: { user } } = await supabase.auth.getUser();
+    const crIds = (crsData ?? []).map((cr: any) => cr.id);
+    let luSet = new Set<string>();
+    if (user && crIds.length > 0) {
+      const { data: lectures } = await supabase
+        .from("cr_lectures")
+        .select("compte_rendu_id")
+        .eq("referent_id", user.id)
+        .in("compte_rendu_id", crIds);
+      luSet = new Set((lectures ?? []).map((l: any) => l.compte_rendu_id));
+    }
+
+    setCreneaux(creneauxData.map((c: any) => {
+      const cr = crParCreneauId.get(c.id) ?? crParDate.get(c.date_creneau) ?? null;
+      return {
+        ...c,
+        cr: cr ? { ...cr, lu: luSet.has(cr.id) } : null,
+      };
+    }));
     setLoadingCreneaux(false);
   }, [situationId]);
 
