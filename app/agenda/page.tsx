@@ -438,131 +438,6 @@ function VueMois({ moisRef, creneaux, referents, profile, onClickCreneau, onClic
 }
 
 /* ============================================================
-   Panneau compte rendu (créneau "réunion", sans situation)
-   L'affichage de ce panneau constitue la "lecture" du CR pour
-   l'utilisateur connecté : on la marque dès que le contenu est chargé.
-   ============================================================ */
-function PanneauCRReunion({ creneau, profile, canWrite, onGlobalRefresh }: {
-  creneau: Creneau; profile: Profile; canWrite: boolean; onGlobalRefresh: () => void;
-}) {
-  const [cr, setCr]           = useState<{
-    id: string; contenu: string; created_at: string; updated_at: string;
-    auteur?: { prenom: string; nom: string; couleur: string };
-  } | null>(null);
-  const [loadingCr, setLoadingCr] = useState(true);
-  const [editing, setEditing]     = useState(false);
-  const [contenu, setContenu]     = useState("");
-  const [saving, setSaving]       = useState(false);
-
-  const load = useCallback(async () => {
-    setLoadingCr(true);
-    const { data } = await supabase
-      .from("comptes_rendus")
-      .select("id, contenu, created_at, updated_at, auteur:profiles!comptes_rendus_auteur_id_fkey(prenom, nom, couleur)")
-      .eq("creneau_id", creneau.id)
-      .not("contenu", "like", "[NOTE]%")
-      .maybeSingle();
-    setCr(data as any);
-    setLoadingCr(false);
-
-    if (data) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: dejaLu } = await supabase
-          .from("cr_lectures")
-          .select("compte_rendu_id")
-          .eq("compte_rendu_id", data.id)
-          .eq("referent_id", user.id)
-          .maybeSingle();
-        if (!dejaLu) {
-          await supabase.from("cr_lectures").insert({ compte_rendu_id: data.id, referent_id: user.id });
-          onGlobalRefresh();
-        }
-      }
-    }
-  }, [creneau.id, onGlobalRefresh]);
-
-  useEffect(() => { load(); }, [load]);
-
-  async function handleSave() {
-    if (!contenu.trim() || !canWrite) return;
-    setSaving(true);
-    if (cr) {
-      await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", cr.id);
-    } else {
-      await supabase.from("comptes_rendus").insert({
-        creneau_id:     creneau.id,
-        situation_id:   null,
-        auteur_id:      profile.id,
-        contenu:        contenu.trim(),
-        date_entretien: creneau.date_creneau,
-        archive:        false,
-      } as any);
-    }
-    setSaving(false);
-    setEditing(false);
-    await load();
-    onGlobalRefresh();
-  }
-
-  const inputCls2 =
-    "w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm text-[#1B1633] " +
-    "outline-none transition placeholder:text-[#B4B1C4] focus:border-[#7C6BD6] focus:ring-4 focus:ring-[#7C6BD6]/15";
-
-  return (
-    <div className="rounded-xl border border-[#E7E6EF] bg-[#F8F7FC] p-4 space-y-3">
-      <p className="text-sm font-semibold text-[#1B1633]">📝 Compte rendu de la réunion</p>
-
-      {loadingCr ? (
-        <p className="text-xs text-[#9A97AD]">Chargement…</p>
-      ) : editing && canWrite ? (
-        <div className="space-y-2">
-          <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={6}
-            placeholder="Rédigez le compte rendu de cette réunion…"
-            className={inputCls2 + " resize-none"} autoFocus />
-          <div className="flex gap-2">
-            <button type="button" onClick={() => { setEditing(false); setContenu(cr?.contenu ?? ""); }}
-              className="flex-1 rounded-xl border border-[#E7E6EF] bg-white px-3 py-2 text-xs text-[#3A3556] hover:bg-[#F3F2FA]">
-              Annuler
-            </button>
-            <button type="button" onClick={handleSave} disabled={saving || !contenu.trim()}
-              className="flex-1 rounded-xl bg-[#1A1440] px-3 py-2 text-xs text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
-              {saving ? "Enregistrement…" : "Enregistrer"}
-            </button>
-          </div>
-        </div>
-      ) : cr ? (
-        <div className="space-y-2">
-          <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{cr.contenu}</p>
-          <p className="text-[11px] text-[#9A97AD]">
-            {cr.auteur?.prenom} {cr.auteur?.nom} · rédigé le {new Date(cr.created_at).toLocaleDateString("fr-FR")}
-            {cr.updated_at !== cr.created_at && " (modifié)"}
-          </p>
-          {canWrite && (
-            <button type="button" onClick={() => { setEditing(true); setContenu(cr.contenu); }}
-              className="rounded-xl border border-[#E7E6EF] bg-white px-3 py-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition">
-              ✏️ Modifier le compte rendu
-            </button>
-          )}
-        </div>
-      ) : (
-        <div>
-          <p className="text-xs text-[#9A97AD] mb-2">Aucun compte rendu rédigé pour cette réunion.</p>
-          {canWrite ? (
-            <button type="button" onClick={() => { setEditing(true); setContenu(""); }}
-              className="rounded-xl bg-[#1A1440] px-3 py-2 text-xs font-medium text-white hover:bg-[#2A1E5C] transition">
-              ✏️ Rédiger le compte rendu
-            </button>
-          ) : (
-            <p className="text-xs text-[#B4B1C4] italic">Seuls les participants de cette réunion peuvent rédiger ce compte rendu.</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ============================================================
    Modale — Créer / modifier un créneau (daté ou non)
    ============================================================ */
 function ModalCreneau({
@@ -621,11 +496,12 @@ function ModalCreneau({
   const hasSituation      = !!form.situation_id;
   const elevesDisponibles = hasSituation ? (elevesMap.get(form.situation_id) ?? []) : [];
 
-  const canWriteCR = !!creneau && (
-    profile.role === "admin" ||
-    creneau.referent_charge_id === profile.id ||
-    (creneau.participants ?? []).some((p) => p.id === profile.id)
-  );
+  // Lien vers la page où lire/rédiger le compte rendu (situation ou réunion).
+  // Basé sur l'état ENREGISTRÉ du créneau (pas sur des modifications non
+  // sauvegardées du formulaire), donc n'apparaît que si le créneau existe déjà.
+  const lienCR = creneau
+    ? (creneau.situation_id ? `/situations/${creneau.situation_id}` : `/reunions/${creneau.id}`)
+    : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -637,6 +513,9 @@ function ModalCreneau({
     }
     setLoading(true); setError(null);
 
+    // Le créateur (referent_id) doit TOUJOURS être la personne réellement
+    // connectée — jamais la personne choisie dans "Référent en charge".
+    // On relit l'identité en direct pour éviter toute valeur obsolète.
     let createurId = profile.id;
     if (!isEdit) {
       const { data: authData, error: authErr } = await supabase.auth.getUser();
@@ -657,11 +536,17 @@ function ModalCreneau({
       eleve_id:           form.eleve_id      || null,
       note:               form.note          || null,
       titre:              hasSituation ? null : (form.titre.trim() || null),
+      // En modification, on conserve le créateur d'origine du créneau.
+      // En création, c'est toujours la personne connectée — le champ
+      // "Référent en charge" (form.referent_charge_id) ne détermine que
+      // qui est ASSIGNÉ, jamais qui est le créateur.
       referent_id:        creneau ? creneau.referent_id : createurId,
       referent_charge_id: form.referent_charge_id || null,
     };
 
     async function syncParticipants(creneauId: string) {
+      // On repart de zéro à chaque sauvegarde : plus simple et fiable
+      // que de calculer un diff, et le volume de participants reste faible.
       await supabase.from("creneau_participants").delete().eq("creneau_id", creneauId);
       if (participants.length > 0) {
         await supabase.from("creneau_participants").insert(
@@ -891,14 +776,33 @@ function ModalCreneau({
               className={inputCls + " resize-none"} disabled={!canEdit} />
           </div>
 
-          {!hasSituation && !isTache && (
-            isEdit ? (
-              <PanneauCRReunion creneau={creneau!} profile={profile} canWrite={canWriteCR} onGlobalRefresh={onSuccess} />
-            ) : (
-              <p className="text-xs text-[#9A97AD] italic">
-                Vous pourrez rédiger le compte rendu de cette réunion une fois le créneau enregistré.
-              </p>
-            )
+          {/* Compte rendu — simple lien vers la page où le lire/rédiger,
+              plus d'édition inline dans l'agenda. */}
+          {lienCR && (
+            <a
+              href={lienCR}
+              className="flex items-center justify-between gap-3 rounded-xl border border-[#E7E6EF]
+                         bg-[#F8F7FC] px-4 py-3 hover:bg-[#F3F2FA] hover:border-[#7C6BD6] transition"
+            >
+              <div>
+                <p className="text-sm font-medium text-[#1B1633]">
+                  {creneau!.a_cr ? "📖 Compte rendu disponible" : "📝 Compte rendu non rédigé"}
+                </p>
+                <p className="text-xs text-[#9A97AD] mt-0.5">
+                  {hasSituation
+                    ? "À consulter ou rédiger depuis la fiche de la situation."
+                    : "À consulter ou rédiger depuis la fiche de la réunion."}
+                </p>
+              </div>
+              <span className="shrink-0 text-sm font-medium text-[#6656B8]">
+                {creneau!.a_cr ? "Lire →" : "Rédiger →"}
+              </span>
+            </a>
+          )}
+          {!creneau && !isTache && (
+            <p className="text-xs text-[#9A97AD] italic">
+              Vous pourrez consulter ou rédiger le compte rendu une fois le créneau enregistré.
+            </p>
           )}
 
           <div className="flex gap-3 pt-2">
