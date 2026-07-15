@@ -239,12 +239,15 @@ export function EditeurRiche({
         const maxLargeur = 400;
         const echelle    = Math.min(1, maxLargeur / img.naturalWidth);
         const largeur    = Math.max(40, Math.round(img.naturalWidth * echelle));
-        const hauteur    = Math.max(40, Math.round(img.naturalHeight * echelle));
+        const ratio      = img.naturalWidth / img.naturalHeight;
 
+        // "resize: horizontal" (et non "both") + "aspect-ratio" fixé : on ne
+        // peut faire glisser que la largeur, la hauteur suit automatiquement
+        // pour conserver les proportions — impossible de déformer l'image.
         const html =
-          `<span contenteditable="false" style="display:inline-block;resize:both;overflow:hidden;` +
-          `width:${largeur}px;height:${hauteur}px;max-width:100%;vertical-align:bottom;">` +
-          `<img src="${dataUrl}" style="width:100%;height:100%;display:block;" /></span>&nbsp;`;
+          `<span contenteditable="false" style="display:inline-block;resize:horizontal;overflow:hidden;` +
+          `width:${largeur}px;aspect-ratio:${ratio};max-width:100%;vertical-align:bottom;">` +
+          `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:contain;display:block;" /></span>&nbsp;`;
 
         ref.current?.focus();
         if (savedRange) {
