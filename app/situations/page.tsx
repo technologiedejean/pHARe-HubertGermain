@@ -26,6 +26,7 @@ type Situation = {
   intimidateurs: ActeurSituation[];
   temoins: ActeurSituation[];
   lanceurs: ActeurSituation[];
+  aUnCrNonLu?: boolean;
 };
 
 type ActeurSituation = {
@@ -678,27 +679,58 @@ export default function SituationsPage() {
   const [showModal, setShowModal]   = useState(false);
 
   const loadSituations = useCallback(async () => {
-    const { data } = await supabase
-      .from("situations")
-      .select(`
-        id, reference, titre, description, statut, gravite,
-        date_signalement, created_at, cree_par,
-        createur:profiles!situations_cree_par_fkey ( nom, prenom ),
-        situation_eleves (
-          id, eleve_id, lanceur_libre, role,
-          eleve:eleves ( nom, prenom, classe )
-        )
-      `)
-      .order("created_at", { ascending: false });
+    // Récupéré directement ici (plutôt que via l'état "profile", potentiellement
+    // pas encore prêt au premier appel de cette fonction mémoïsée).
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (data) {
-      setSituations(data.map((s: any) => ({
+    const [sitRes, crsRes] = await Promise.all([
+      supabase
+        .from("situations")
+        .select(`
+          id, reference, titre, description, statut, gravite,
+          date_signalement, created_at, cree_par,
+          createur:profiles!situations_cree_par_fkey ( nom, prenom ),
+          situation_eleves (
+            id, eleve_id, lanceur_libre, role,
+            eleve:eleves ( nom, prenom, classe )
+          )
+        `)
+        .order("created_at", { ascending: false }),
+      // Comptes rendus d'entretien (situation_id non nul, hors notes) —
+      // la RLS limite déjà ces résultats aux situations accessibles par
+      // l'utilisateur connecté.
+      supabase
+        .from("comptes_rendus")
+        .select("id, situation_id")
+        .not("situation_id", "is", null)
+        .not("contenu", "like", "[NOTE]%"),
+    ]);
+
+    // Détermine, pour chaque situation, si au moins un de ses CR d'entretien
+    // n'a pas encore été ouvert par l'utilisateur connecté.
+    const situationsAvecNonLu = new Set<string>();
+    if (user && crsRes.data && crsRes.data.length > 0) {
+      const crIds = crsRes.data.map((c: any) => c.id);
+      const { data: lectures } = await supabase
+        .from("cr_lectures")
+        .select("compte_rendu_id")
+        .eq("referent_id", user.id)
+        .in("compte_rendu_id", crIds);
+      const luSet = new Set((lectures ?? []).map((l: any) => l.compte_rendu_id));
+      for (const cr of crsRes.data as any[]) {
+        if (!luSet.has(cr.id)) situationsAvecNonLu.add(cr.situation_id);
+      }
+    }
+
+    if (sitRes.data) {
+      setSituations(sitRes.data.map((s: any) => ({
         ...s,
         createur: s.createur,
         victimes:      (s.situation_eleves ?? []).filter((x: any) => x.role === "victime"),
         intimidateurs: (s.situation_eleves ?? []).filter((x: any) => x.role === "intimidateur"),
         temoins:       (s.situation_eleves ?? []).filter((x: any) => x.role === "temoin"),
         lanceurs:      (s.situation_eleves ?? []).filter((x: any) => x.role === "lanceur_alerte"),
+        aUnCrNonLu:    situationsAvecNonLu.has(s.id),
       })));
     }
   }, []);
@@ -754,7 +786,12 @@ export default function SituationsPage() {
             {s.reference && (
               <p className="text-[10px] font-mono text-[#9A97AD] mb-0.5">{s.reference}</p>
             )}
-            <p className="font-medium text-[#1B1633] leading-snug">{s.titre}</p>
+            <p className="font-medium text-[#1B1633] leading-snug flex items-center gap-1.5">
+              {s.titre}
+              {s.aUnCrNonLu && (
+                <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" title="Compte rendu non lu" />
+              )}
+            </p>
             {s.date_signalement && (
               <p className="text-xs text-[#9A97AD] mt-0.5">
                 Signalé le {new Date(s.date_signalement).toLocaleDateString("fr-FR")}
@@ -808,7 +845,12 @@ export default function SituationsPage() {
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="flex-1 min-w-0">
           {s.reference && <p className="text-[10px] font-mono text-[#9A97AD]">{s.reference}</p>}
-          <p className="font-semibold text-[#1B1633] leading-snug">{s.titre}</p>
+          <p className="font-semibold text-[#1B1633] leading-snug flex items-center gap-1.5">
+            {s.titre}
+            {s.aUnCrNonLu && (
+              <span className="h-2 w-2 shrink-0 rounded-full bg-red-500" title="Compte rendu non lu" />
+            )}
+          </p>
         </div>
         <StatutBadge statut={s.statut} />
       </div>

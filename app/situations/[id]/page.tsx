@@ -518,9 +518,10 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh, peut
    existant que l'utilisateur connecté n'a pas encore ouvert. Elle
    disparaît (pour lui uniquement) dès qu'il déplie la carte.
    ============================================================ */
-function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh, peutCompleter, peutModifier }: {
+function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh, onLectureCR, peutCompleter, peutModifier }: {
   creneau: CreneauAgenda; situationId: string;
   acteurs: ActeurSituation[]; profile: Profile; onRefresh: () => void;
+  onLectureCR: () => void;
   peutCompleter: boolean; peutModifier: boolean;
 }) {
   const [ouvert, setOuvert]       = useState(false);
@@ -543,13 +544,21 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
 
   async function marquerCommeLu() {
     if (!creneau.cr) return;
-    setLuLocal(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from("cr_lectures").upsert(
+    const { error } = await supabase.from("cr_lectures").upsert(
       { compte_rendu_id: creneau.cr.id, referent_id: user.id },
       { onConflict: "compte_rendu_id,referent_id", ignoreDuplicates: true }
     );
+    if (error) {
+      // On ne met PAS à jour l'état local si l'écriture a échoué : sinon la
+      // pastille disparaît visuellement sans que rien n'ait été enregistré,
+      // et elle réapparaît au rechargement — exactement le bug signalé.
+      console.error("Impossible d'enregistrer la lecture du compte rendu :", error);
+      return;
+    }
+    setLuLocal(true);
+    onLectureCR(); // rafraîchit la pastille de l'onglet "Entretiens" au niveau de la page
   }
 
   function toggleOuvert() {
@@ -709,8 +718,9 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
 /* ============================================================
    ONGLET ENTRETIENS
    ============================================================ */
-function OngletEntretiens({ situationId, acteurs, profile, onRefresh, peutCompleter, peutModifier }: {
+function OngletEntretiens({ situationId, acteurs, profile, onRefresh, onLectureCR, peutCompleter, peutModifier }: {
   situationId: string; acteurs: ActeurSituation[]; profile: Profile; onRefresh: () => void;
+  onLectureCR: () => void;
   peutCompleter: boolean; peutModifier: boolean;
 }) {
   const [creneaux, setCreneaux]               = useState<CreneauAgenda[]>([]);
@@ -820,7 +830,7 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, peutComple
           <div className="space-y-3">
             {creneaux.map((c) => (
               <CarteCreneauDepliable key={c.id} creneau={c} situationId={situationId}
-                acteurs={acteurs} profile={profile} onRefresh={loadCreneaux}
+                acteurs={acteurs} profile={profile} onRefresh={loadCreneaux} onLectureCR={onLectureCR}
                 peutCompleter={peutCompleter} peutModifier={peutModifier} />
             ))}
           </div>
@@ -1408,6 +1418,9 @@ export default function FicheSituationPage() {
   const [monNiveau, setMonNiveau] = useState<NiveauDroit>("lecture");
   const [loading, setLoading]     = useState(true);
   const [onglet, setOnglet]       = useState<OngletType>("infos");
+  // Pastille sur l'onglet "Entretiens" : vrai si au moins un CR d'entretien de
+  // cette situation n'a pas encore été ouvert par l'utilisateur connecté.
+  const [entretiensNonLus, setEntretiensNonLus] = useState(false);
 
   // "modification" couvre le contrôle complet (les admins ont toujours ce niveau).
   // "completion" (ou plus) permet d'ajouter du contenu (CR, notes, qualifications, acteurs).
@@ -1426,6 +1439,31 @@ export default function FicheSituationPage() {
     ]);
     if (sitRes.data)     setSituation(sitRes.data as any);
     if (acteursRes.data) setActeurs(acteursRes.data as any);
+  }, [situationId]);
+
+  // Recalcule indépendamment de l'onglet actif, pour que la pastille soit
+  // toujours à jour même si l'onglet Entretiens n'a jamais été ouvert.
+  const checkEntretiensNonLus = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setEntretiensNonLus(false); return; }
+
+    const { data: crs } = await supabase
+      .from("comptes_rendus")
+      .select("id")
+      .eq("situation_id", situationId)
+      .not("contenu", "like", "[NOTE]%");
+
+    if (!crs || crs.length === 0) { setEntretiensNonLus(false); return; }
+
+    const crIds = crs.map((c: any) => c.id);
+    const { data: lectures } = await supabase
+      .from("cr_lectures")
+      .select("compte_rendu_id")
+      .eq("referent_id", user.id)
+      .in("compte_rendu_id", crIds);
+    const luSet = new Set((lectures ?? []).map((l: any) => l.compte_rendu_id));
+
+    setEntretiensNonLus(crIds.some((id) => !luSet.has(id)));
   }, [situationId]);
 
   useEffect(() => {
@@ -1455,10 +1493,11 @@ export default function FicheSituationPage() {
         .eq("role", "referent").eq("actif", true).order("nom");
       setReferents(refs ?? []);
       await loadSituation();
+      await checkEntretiensNonLus();
       setLoading(false);
     }
     init();
-  }, [router, loadSituation, situationId]);
+  }, [router, loadSituation, checkEntretiensNonLus, situationId]);
 
   const ONGLETS: { key: OngletType; label: string }[] = [
     { key: "infos",           label: "Infos"          },
@@ -1482,7 +1521,8 @@ export default function FicheSituationPage() {
         onRefresh={loadSituation} peutCompleter={peutCompleter} peutModifier={peutModifier} />;
     if (onglet === "entretiens")
       return <OngletEntretiens situationId={situationId} acteurs={acteurs} profile={profile}
-        onRefresh={loadSituation} peutCompleter={peutCompleter} peutModifier={peutModifier} />;
+        onRefresh={loadSituation} onLectureCR={checkEntretiensNonLus}
+        peutCompleter={peutCompleter} peutModifier={peutModifier} />;
     if (onglet === "notes")
       return <OngletNotes situationId={situationId} profile={profile} peutCompleter={peutCompleter} />;
     if (onglet === "droits")
@@ -1496,10 +1536,13 @@ export default function FicheSituationPage() {
     <div className={`flex ${mobile ? "border-t border-[#EEEDF5] overflow-x-auto" : "border-b border-[#EEEDF5] mb-6 gap-1"}`}>
       {ONGLETS.map((o) => (
         <button key={o.key} onClick={() => setOnglet(o.key)}
-          className={`${mobile ? "flex-1 min-w-fit px-3 py-3" : "px-4 py-3 -mb-px"} text-sm font-medium transition border-b-2 ${
+          className={`${mobile ? "flex-1 min-w-fit px-3 py-3" : "px-4 py-3 -mb-px"} text-sm font-medium transition border-b-2 flex items-center justify-center gap-1.5 ${
             onglet === o.key ? "border-[#6656B8] text-[#6656B8]" : "border-transparent text-[#6C6A80] hover:text-[#1B1633]"
           }`}>
           {o.label}
+          {o.key === "entretiens" && entretiensNonLus && (
+            <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" title="Compte rendu non lu" />
+          )}
         </button>
       ))}
     </div>
