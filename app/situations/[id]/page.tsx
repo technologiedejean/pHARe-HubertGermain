@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { EditeurRiche, ContenuRiche } from "@/components/EditeurRiche";
 
 /* ============================================================
    Types
@@ -139,6 +140,14 @@ function buildInfosEleve(creneau: CreneauAgenda, acteurs: ActeurSituation[]): st
   if (premier?.eleve)
     return ` avec ${premier.eleve.prenom} ${premier.eleve.nom} en qualité de ${ROLE_LABEL[premier.role]}`;
   return "";
+}
+
+// Le contenu des CR est désormais du HTML (éditeur riche). Un simple ".trim()"
+// ne suffit pas à détecter un contenu réellement vide (un div contentEditable
+// vide peut renvoyer "", "<br>" ou "<p></p>" selon le navigateur) : on retire
+// les balises avant de vérifier.
+function estVide(html: string): boolean {
+  return !html || html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
 }
 
 /* ============================================================
@@ -517,6 +526,9 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh, peut
    Une pastille rouge signale, sur l'en-tête replié, un compte rendu
    existant que l'utilisateur connecté n'a pas encore ouvert. Elle
    disparaît (pour lui uniquement) dès qu'il déplie la carte.
+
+   La rédaction du CR utilise désormais l'éditeur riche (titres,
+   gras, souligné, alignement, couleur, @mentions et #références).
    ============================================================ */
 function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh, onLectureCR, peutCompleter, peutModifier }: {
   creneau: CreneauAgenda; situationId: string;
@@ -593,14 +605,14 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
   const { ligne1, ligne2, couleurTexte, bg, bandeColor, icone } = getBandeauInfo();
 
   async function handleSaveCR() {
-    if (!contenu.trim() || !canEdit) return;
+    if (estVide(contenu) || !canEdit) return;
     setSaving(true);
     if (hasCR && creneau.cr) {
-      await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", creneau.cr.id);
+      await supabase.from("comptes_rendus").update({ contenu }).eq("id", creneau.cr.id);
     } else {
       await supabase.from("comptes_rendus").insert({
         situation_id: situationId, creneau_id: creneau.id,
-        auteur_id: profile.id, contenu: contenu.trim(),
+        auteur_id: profile.id, contenu,
         date_entretien: creneau.date_creneau, archive: false,
       });
     }
@@ -659,12 +671,17 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
           {editingCR && canEdit ? (
             <div className="space-y-3">
               <p className="text-sm font-semibold text-[#1B1633]">{hasCR ? "Modifier le compte rendu" : "Rédiger le compte rendu"}</p>
-              <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={7}
-                placeholder="Rédigez le compte rendu de cet entretien…" className={inputCls + " resize-none"} autoFocus />
+              <EditeurRiche
+                value={contenu}
+                onChange={setContenu}
+                placeholder="Rédigez le compte rendu de cet entretien…"
+                minHeightClass="min-h-[180px]"
+                autoFocus
+              />
               <div className="flex gap-3">
                 <button onClick={() => { setEditingCR(false); setContenu(creneau.cr?.contenu ?? ""); }}
                   className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">Annuler</button>
-                <button onClick={handleSaveCR} disabled={saving || !contenu.trim()}
+                <button onClick={handleSaveCR} disabled={saving || estVide(contenu)}
                   className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
                   {saving ? "Enregistrement…" : "Enregistrer"}
                 </button>
@@ -696,7 +713,7 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
                   </button>
                 )}
               </div>
-              <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{creneau.cr!.contenu}</p>
+              <ContenuRiche html={creneau.cr!.contenu} />
             </div>
           ) : (
             <div className="text-center py-4">
@@ -790,7 +807,7 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, onLectureC
   useEffect(() => { loadCreneaux(); }, [loadCreneaux]);
 
   async function handleCreate() {
-    if (!newContenu.trim() || !peutCompleter) return;
+    if (estVide(newContenu) || !peutCompleter) return;
     if (newHeureFin <= newHeureDebut) { setCreateError("L'heure de fin doit être après l'heure de début."); return; }
     setCreating(true); setCreateError(null);
 
@@ -803,7 +820,7 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, onLectureC
     if (nouveauCreneau) {
       await supabase.from("comptes_rendus").insert({
         situation_id: situationId, creneau_id: nouveauCreneau.id,
-        auteur_id: profile.id, contenu: newContenu.trim(),
+        auteur_id: profile.id, contenu: newContenu,
         date_entretien: newDate, archive: false,
       });
     }
@@ -899,13 +916,17 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, onLectureC
               <p className="text-xs text-[#9A97AD] -mt-2">ℹ️ Le créneau sera automatiquement ajouté à l'agenda.</p>
               <div>
                 <label className="block text-xs font-medium text-[#9A97AD] mb-1">Compte rendu</label>
-                <textarea value={newContenu} onChange={(e) => setNewContenu(e.target.value)} rows={6}
-                  placeholder="Rédigez le compte rendu de l'entretien…" className={inputCls + " resize-none"} />
+                <EditeurRiche
+                  value={newContenu}
+                  onChange={setNewContenu}
+                  placeholder="Rédigez le compte rendu de l'entretien…"
+                  minHeightClass="min-h-[160px]"
+                />
               </div>
               <div className="flex gap-3">
                 <button onClick={() => { setNouveau(false); setNewContenu(""); setNewEleveId(""); setCreateError(null); }}
                   className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">Annuler</button>
-                <button onClick={handleCreate} disabled={creating || !newContenu.trim()}
+                <button onClick={handleCreate} disabled={creating || estVide(newContenu)}
                   className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
                   {creating ? "Enregistrement…" : "Enregistrer + ajouter à l'agenda"}
                 </button>
@@ -919,7 +940,7 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, onLectureC
 }
 
 /* ============================================================
-   ONGLET NOTES
+   ONGLET NOTES (non concerné par l'éditeur riche — reste en texte brut)
    ============================================================ */
 function OngletNotes({ situationId, profile, peutCompleter }: {
   situationId: string; profile: Profile; peutCompleter: boolean;
