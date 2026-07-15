@@ -1515,7 +1515,7 @@ export default function FicheSituationPage() {
     );
   }
 
-  const OngletContent = () => {
+  const renderOnglet = () => {
     if (onglet === "infos")
       return <OngletInfos situation={situation} acteurs={acteurs} profile={profile} situationId={situationId}
         onRefresh={loadSituation} peutCompleter={peutCompleter} peutModifier={peutModifier} />;
@@ -1532,21 +1532,23 @@ export default function FicheSituationPage() {
     return null;
   };
 
-  const TabBar = ({ mobile = false }: { mobile?: boolean }) => (
-    <div className={`flex ${mobile ? "border-t border-[#EEEDF5] overflow-x-auto" : "border-b border-[#EEEDF5] mb-6 gap-1"}`}>
-      {ONGLETS.map((o) => (
-        <button key={o.key} onClick={() => setOnglet(o.key)}
-          className={`${mobile ? "flex-1 min-w-fit px-3 py-3" : "px-4 py-3 -mb-px"} text-sm font-medium transition border-b-2 flex items-center justify-center gap-1.5 ${
-            onglet === o.key ? "border-[#6656B8] text-[#6656B8]" : "border-transparent text-[#6C6A80] hover:text-[#1B1633]"
-          }`}>
-          {o.label}
-          {o.key === "entretiens" && entretiensNonLus && (
-            <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" title="Compte rendu non lu" />
-          )}
-        </button>
-      ))}
-    </div>
-  );
+  const renderTabBar = (mobile = false) => {
+    return (
+      <div className={`flex ${mobile ? "border-t border-[#EEEDF5] overflow-x-auto" : "border-b border-[#EEEDF5] mb-6 gap-1"}`}>
+        {ONGLETS.map((o) => (
+          <button key={o.key} onClick={() => setOnglet(o.key)}
+            className={`${mobile ? "flex-1 min-w-fit px-3 py-3" : "px-4 py-3 -mb-px"} text-sm font-medium transition border-b-2 flex items-center justify-center gap-1.5 ${
+              onglet === o.key ? "border-[#6656B8] text-[#6656B8]" : "border-transparent text-[#6C6A80] hover:text-[#1B1633]"
+            }`}>
+            {o.label}
+            {o.key === "entretiens" && entretiensNonLus && (
+              <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" title="Compte rendu non lu" />
+            )}
+          </button>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-[#FBFBFD] text-[#1B1633]">
@@ -1568,9 +1570,9 @@ export default function FicheSituationPage() {
               <p className="mt-1.5 text-[11px] text-[#9A97AD]">🔒 Accès en lecture seule</p>
             )}
           </div>
-          <TabBar mobile />
+          {renderTabBar(true)}
         </header>
-        <main className="flex-1 px-5 py-5"><OngletContent /></main>
+        <main className="flex-1 px-5 py-5">{renderOnglet()}</main>
       </div>
 
       {/* 💻 PC */}
@@ -1592,8 +1594,8 @@ export default function FicheSituationPage() {
             </span>
           </div>
         </div>
-        <TabBar />
-        <OngletContent />
+        {renderTabBar()}
+        {renderOnglet()}
       </div>
     </div>
   );
