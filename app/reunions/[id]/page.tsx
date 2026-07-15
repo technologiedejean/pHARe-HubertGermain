@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { EditeurRiche, ContenuRiche } from "@/components/EditeurRiche";
 
 /* ============================================================
    Types
@@ -43,14 +44,18 @@ function Avatar({ r, size = "sm" }: { r: Referent; size?: "sm" | "md" }) {
   );
 }
 
-const inputCls =
-  "w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm text-[#1B1633] outline-none " +
-  "transition placeholder:text-[#B4B1C4] focus:border-[#7C6BD6] focus:ring-4 focus:ring-[#7C6BD6]/15";
+// Le contenu des CR est désormais du HTML (éditeur riche). Un simple ".trim()"
+// ne suffit pas à détecter un contenu réellement vide (un div contentEditable
+// vide peut renvoyer "", "<br>" ou "<p></p>" selon le navigateur) : on retire
+// les balises avant de vérifier.
+function estVide(html: string): boolean {
+  return !html || html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
+}
 
 /* ============================================================
    Infos de la réunion
    (Composant HORS du render de la page pour garder une identité stable
-   entre les rendus — sinon les enfants, dont le textarea du CR, seraient
+   entre les rendus — sinon les enfants, dont l'éditeur du CR, seraient
    démontés/remontés à chaque frappe.)
    ============================================================ */
 function InfosReunion({ reunion, tousParticipants, onAllerAgenda }: {
@@ -119,14 +124,19 @@ function PanneauCR({
       <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">Compte rendu</p>
       {editing && canWrite ? (
         <div className="space-y-3">
-          <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={8}
-            placeholder="Rédigez le compte rendu de cette réunion…" className={inputCls + " resize-none"} autoFocus />
+          <EditeurRiche
+            value={contenu}
+            onChange={setContenu}
+            placeholder="Rédigez le compte rendu de cette réunion…"
+            minHeightClass="min-h-[200px]"
+            autoFocus
+          />
           <div className="flex gap-3">
             <button onClick={onCancelEdit}
               className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">
               Annuler
             </button>
-            <button onClick={onSave} disabled={saving || !contenu.trim()}
+            <button onClick={onSave} disabled={saving || estVide(contenu)}
               className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
               {saving ? "Enregistrement…" : "Enregistrer"}
             </button>
@@ -146,7 +156,7 @@ function PanneauCR({
               </button>
             )}
           </div>
-          <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{cr.contenu}</p>
+          <ContenuRiche html={cr.contenu} />
         </div>
       ) : (
         <div className="text-center py-4">
@@ -262,10 +272,10 @@ export default function ReunionDetailPage() {
     (reunion.participants ?? []).some((p) => p.id === profile.id);
 
   async function handleSave() {
-    if (!contenu.trim() || !profile || !reunion) return;
+    if (estVide(contenu) || !profile || !reunion) return;
     setSaving(true);
     if (cr) {
-      await supabase.from("comptes_rendus").update({ contenu: contenu.trim() }).eq("id", cr.id);
+      await supabase.from("comptes_rendus").update({ contenu }).eq("id", cr.id);
     } else {
       // Le cast "as any" contourne un typage Supabase généré AVANT la migration
       // (situation_id y est encore déclaré non-nullable). À retirer une fois
@@ -274,7 +284,7 @@ export default function ReunionDetailPage() {
         creneau_id:     reunionId,
         situation_id:   null,
         auteur_id:      profile.id,
-        contenu:        contenu.trim(),
+        contenu,
         date_entretien: reunion.date_creneau,
         archive:        false,
       } as any);
