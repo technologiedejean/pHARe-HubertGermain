@@ -13,10 +13,13 @@ import { supabase } from "@/lib/supabase";
    Le contenu est stocké/renvoyé en HTML (pas en texte brut).
 
    Autocomplétion :
-   - "@" propose des référents et des élèves → insère une pastille
-     non modifiable "@Prénom Nom".
-   - "#" propose des situations et des réunions → insère un lien
-     cliquable "#Titre" vers la fiche correspondante.
+   - "@" propose des référents et des élèves.
+     - Un référent devient une pastille non cliquable "@Prénom Nom"
+       (pas de fiche individuelle à ouvrir).
+     - Un élève devient un lien "@Prénom Nom" vers sa fiche,
+       ouvert dans un nouvel onglet.
+   - "#" propose des situations et des réunions → devient un lien
+     "#Titre" vers la fiche correspondante, ouvert dans un nouvel onglet.
    ============================================================ */
 
 const COULEURS_TEXTE = [
@@ -76,6 +79,7 @@ export function EditeurRiche({
   autoFocus?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
   const aRempliInitial = useRef(false);
   const rangeActifRef = useRef<Range | null>(null);
   const timerRechercheRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -211,11 +215,14 @@ export function EditeurRiche({
     sel.addRange(rangeActifRef.current);
 
     let html: string;
-    if (item.kind === "referent" || item.kind === "eleve") {
-      html = `<span class="${MENTION_CLASS}" contenteditable="false" data-mention-kind="${item.kind}" data-mention-id="${item.id}">@${escapeHtml(item.label)}</span>`;
+    if (item.kind === "referent") {
+      // Pas de fiche individuelle pour un référent : simple pastille non cliquable.
+      html = `<span class="${MENTION_CLASS}" contenteditable="false" data-mention-kind="referent" data-mention-id="${item.id}">@${escapeHtml(item.label)}</span>`;
+    } else if (item.kind === "eleve") {
+      html = `<a href="/eleves/${item.id}" target="_blank" rel="noopener noreferrer" class="${MENTION_CLASS}" contenteditable="false" data-mention-kind="eleve" data-mention-id="${item.id}">@${escapeHtml(item.label)}</a>`;
     } else {
       const href = item.kind === "situation" ? `/situations/${item.id}` : `/reunions/${item.id}`;
-      html = `<a href="${href}" class="${REFERENCE_CLASS}" contenteditable="false" data-ref-kind="${item.kind}" data-ref-id="${item.id}">#${escapeHtml(item.label)}</a>`;
+      html = `<a href="${href}" target="_blank" rel="noopener noreferrer" class="${REFERENCE_CLASS}" contenteditable="false" data-ref-kind="${item.kind}" data-ref-id="${item.id}">#${escapeHtml(item.label)}</a>`;
     }
 
     ref.current?.focus();
@@ -232,11 +239,16 @@ export function EditeurRiche({
     }
   }
 
-  // Ferme le popup si on clique ailleurs que dans la liste elle-même.
+  // Ferme le popup uniquement si le clic a lieu VRAIMENT en dehors de celui-ci.
+  // (Avant ce correctif, tout mousedown fermait le popup avant même que le
+  // clic sur un résultat n'ait le temps d'être traité, empêchant toute
+  // sélection — c'est le bug remonté : "je clique mais rien ne se complète".)
   useEffect(() => {
     if (!popup) return;
-    function handleClickOutside() { setPopup(null); }
-    // Micro-délai pour ne pas fermer immédiatement le clic qui vient d'ouvrir le popup.
+    function handleClickOutside(e: MouseEvent) {
+      if (popupRef.current && popupRef.current.contains(e.target as Node)) return;
+      setPopup(null);
+    }
     const t = setTimeout(() => document.addEventListener("mousedown", handleClickOutside), 0);
     return () => { clearTimeout(t); document.removeEventListener("mousedown", handleClickOutside); };
   }, [popup]);
@@ -315,10 +327,11 @@ export function EditeurRiche({
       {/* Popup d'autocomplétion */}
       {popup && (
         <div
+          ref={popupRef}
           className="fixed z-[9999] w-64 max-h-56 overflow-y-auto rounded-xl border border-[#E7E6EF]
                      bg-white shadow-xl"
           style={{ top: popup.top, left: popup.left }}
-          onMouseDown={(e) => e.preventDefault()} // évite de perdre le focus/la sélection avant le clic
+          onMouseDown={(e) => e.preventDefault()} // évite que le clic ne fasse perdre le focus/la sélection dans l'éditeur
         >
           {popup.chargement ? (
             <p className="px-3 py-2.5 text-xs text-[#9A97AD]">Recherche…</p>
