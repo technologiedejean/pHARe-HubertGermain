@@ -311,6 +311,7 @@ export function EditeurRiche({
         ref={ref}
         contentEditable
         onInput={handleInput}
+        onMouseUp={handleInput}
         onKeyDown={handleKeyDown}
         onKeyUp={detecterMention}
         onClick={detecterMention}
@@ -321,7 +322,10 @@ export function EditeurRiche({
                    [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:my-2
                    [&_h2]:text-base [&_h2]:font-semibold [&_h2]:my-1.5
                    [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:my-1
-                   [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5`}
+                   [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5
+                   [&_img]:inline-block [&_img]:align-middle [&_img]:max-w-full
+                   [&_img]:rounded-lg [&_img]:my-1 [&_img]:resize [&_img]:overflow-hidden
+                   [&_img]:cursor-nwse-resize`}
       />
 
       {/* Popup d'autocomplétion */}
@@ -375,7 +379,8 @@ export function ContenuRiche({ html, className = "" }: { html: string; className
                  [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:my-2
                  [&_h2]:text-base [&_h2]:font-semibold [&_h2]:my-1.5
                  [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:my-1
-                 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
+                 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5
+                 [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-lg [&_img]:my-1 ${className}`}
       dangerouslySetInnerHTML={{ __html: contenuAffiche }}
     />
   );
