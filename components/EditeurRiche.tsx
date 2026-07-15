@@ -1,0 +1,369 @@
+// >>> Ce fichier REMPLACE : components/EditeurRiche.tsx <<<
+"use client";
+
+import { useRef, useEffect, useState, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+
+/* ============================================================
+   Éditeur riche minimal — sans librairie tierce.
+   Utilise contentEditable + document.execCommand (toujours
+   supporté par tous les navigateurs modernes en 2026, même si
+   déprécié côté spécification W3C).
+
+   Le contenu est stocké/renvoyé en HTML (pas en texte brut).
+
+   Autocomplétion :
+   - "@" propose des référents et des élèves → insère une pastille
+     non modifiable "@Prénom Nom".
+   - "#" propose des situations et des réunions → insère un lien
+     cliquable "#Titre" vers la fiche correspondante.
+   ============================================================ */
+
+const COULEURS_TEXTE = [
+  { nom: "Par défaut", valeur: "#1B1633" },
+  { nom: "Rouge",       valeur: "#dc2626" },
+  { nom: "Bleu",        valeur: "#2563eb" },
+  { nom: "Vert",        valeur: "#059669" },
+  { nom: "Orange",      valeur: "#d97706" },
+  { nom: "Violet",      valeur: "#7c3aed" },
+];
+
+const barreBoutonCls =
+  "flex h-7 min-w-[28px] items-center justify-center rounded-lg border border-[#E7E6EF] " +
+  "bg-white px-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition";
+
+// Classes utilisées à la fois ici (barre d'aperçu) et injectées dans le HTML
+// stocké — écrites en dur ici pour que Tailwind les détecte et génère le CSS
+// correspondant, même si elles finissent dans une chaîne insérée dynamiquement.
+const MENTION_CLASS =
+  "cr-mention inline-flex items-center rounded-full bg-[#F5F3FF] px-1.5 py-0.5 text-[#6656B8] font-medium";
+const REFERENCE_CLASS =
+  "cr-reference inline-flex items-center rounded-full bg-[#EFF6FF] px-1.5 py-0.5 text-blue-700 font-medium no-underline hover:underline";
+
+type ResultatAutocomplete = {
+  id: string;
+  kind: "referent" | "eleve" | "situation" | "reunion";
+  label: string;
+  sublabel?: string;
+};
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function iconePour(kind: ResultatAutocomplete["kind"]): string {
+  if (kind === "referent") return "🧑";
+  if (kind === "eleve")    return "🎓";
+  if (kind === "situation") return "📋";
+  return "🗓️";
+}
+
+export function EditeurRiche({
+  value,
+  onChange,
+  placeholder = "Rédigez ici…",
+  minHeightClass = "min-h-[160px]",
+  autoFocus = false,
+}: {
+  value: string;
+  onChange: (html: string) => void;
+  placeholder?: string;
+  minHeightClass?: string;
+  autoFocus?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const aRempliInitial = useRef(false);
+  const rangeActifRef = useRef<Range | null>(null);
+  const timerRechercheRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [popup, setPopup] = useState<{
+    trigger: "@" | "#";
+    top: number;
+    left: number;
+    resultats: ResultatAutocomplete[];
+    chargement: boolean;
+  } | null>(null);
+
+  // On ne réinjecte le HTML dans la zone éditable qu'une seule fois au montage
+  // (ou si "value" change de l'extérieur, ex. annulation) — jamais à chaque
+  // frappe, sinon le curseur saute au début à chaque caractère tapé.
+  useEffect(() => {
+    if (ref.current && ref.current.innerHTML !== value) {
+      ref.current.innerHTML = value || "";
+    }
+    if (!aRempliInitial.current && autoFocus) {
+      aRempliInitial.current = true;
+      ref.current?.focus();
+    }
+  }, [value, autoFocus]);
+
+  function exec(commande: string, argument?: string) {
+    ref.current?.focus();
+    document.execCommand(commande, false, argument);
+    onChange(ref.current?.innerHTML ?? "");
+  }
+
+  async function rechercher(trigger: "@" | "#", requete: string) {
+    setPopup((p) => (p ? { ...p, chargement: true } : p));
+
+    let resultats: ResultatAutocomplete[] = [];
+
+    if (trigger === "@") {
+      const [refRes, elevesRes] = await Promise.all([
+        supabase.from("profiles").select("id, nom, prenom")
+          .eq("actif", true).in("role", ["admin", "referent"])
+          .or(`nom.ilike.%${requete}%,prenom.ilike.%${requete}%`)
+          .order("nom").limit(5),
+        supabase.from("eleves").select("id, nom, prenom, classe")
+          .or(`nom.ilike.%${requete}%,prenom.ilike.%${requete}%`)
+          .order("nom").limit(5),
+      ]);
+      resultats = [
+        ...(refRes.data ?? []).map((r: any) => ({
+          id: r.id, kind: "referent" as const,
+          label: `${r.prenom} ${r.nom}`, sublabel: "Référent",
+        })),
+        ...(elevesRes.data ?? []).map((e: any) => ({
+          id: e.id, kind: "eleve" as const,
+          label: `${e.prenom} ${e.nom}`, sublabel: e.classe,
+        })),
+      ];
+    } else {
+      const [sitRes, reuRes] = await Promise.all([
+        supabase.from("situations").select("id, titre, reference")
+          .ilike("titre", `%${requete}%`).limit(5),
+        supabase.from("creneaux").select("id, titre, date_creneau")
+          .is("situation_id", null).not("titre", "is", null).not("date_creneau", "is", null)
+          .ilike("titre", `%${requete}%`).order("date_creneau", { ascending: false }).limit(5),
+      ]);
+      resultats = [
+        ...(sitRes.data ?? []).map((s: any) => ({
+          id: s.id, kind: "situation" as const,
+          label: s.titre, sublabel: s.reference ?? "Situation",
+        })),
+        ...(reuRes.data ?? []).map((r: any) => ({
+          id: r.id, kind: "reunion" as const,
+          label: r.titre, sublabel: "Réunion",
+        })),
+      ];
+    }
+
+    setPopup((p) => (p ? { ...p, resultats, chargement: false } : p));
+  }
+
+  function lancerRechercheDebouncee(trigger: "@" | "#", requete: string) {
+    if (timerRechercheRef.current) clearTimeout(timerRechercheRef.current);
+    timerRechercheRef.current = setTimeout(() => rechercher(trigger, requete), 200);
+  }
+
+  // Détecte si le curseur est actuellement en train de saisir un "@..." ou
+  // "#..." (sans espace depuis le déclencheur), et met à jour/ouvre le popup
+  // d'autocomplétion en conséquence. Sinon, ferme le popup.
+  const detecterMention = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !ref.current) { setPopup(null); return; }
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE) {
+      setPopup(null); return;
+    }
+    if (!ref.current.contains(range.startContainer)) { setPopup(null); return; }
+
+    const texte = range.startContainer.textContent ?? "";
+    const caret = range.startOffset;
+    const avantCaret = texte.slice(0, caret);
+    const match = avantCaret.match(/(^|\s)([@#])([^\s@#]*)$/);
+    if (!match) { setPopup(null); return; }
+
+    const trigger    = match[2] as "@" | "#";
+    const requete    = match[3];
+    const startIndex = avantCaret.length - match[2].length - match[3].length;
+
+    const mentionRange = document.createRange();
+    mentionRange.setStart(range.startContainer, startIndex);
+    mentionRange.setEnd(range.startContainer, caret);
+    rangeActifRef.current = mentionRange.cloneRange();
+
+    const rect = mentionRange.getBoundingClientRect();
+    setPopup((p) => ({
+      trigger,
+      top: rect.bottom + 4,
+      left: rect.left,
+      resultats: p && p.trigger === trigger ? p.resultats : [],
+      chargement: true,
+    }));
+    lancerRechercheDebouncee(trigger, requete);
+  }, []);
+
+  function handleInput() {
+    onChange(ref.current?.innerHTML ?? "");
+    detecterMention();
+  }
+
+  function insererResultat(item: ResultatAutocomplete) {
+    if (!rangeActifRef.current) return;
+    const sel = window.getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    sel.addRange(rangeActifRef.current);
+
+    let html: string;
+    if (item.kind === "referent" || item.kind === "eleve") {
+      html = `<span class="${MENTION_CLASS}" contenteditable="false" data-mention-kind="${item.kind}" data-mention-id="${item.id}">@${escapeHtml(item.label)}</span>`;
+    } else {
+      const href = item.kind === "situation" ? `/situations/${item.id}` : `/reunions/${item.id}`;
+      html = `<a href="${href}" class="${REFERENCE_CLASS}" contenteditable="false" data-ref-kind="${item.kind}" data-ref-id="${item.id}">#${escapeHtml(item.label)}</a>`;
+    }
+
+    ref.current?.focus();
+    document.execCommand("insertHTML", false, `${html}&nbsp;`);
+    onChange(ref.current?.innerHTML ?? "");
+    setPopup(null);
+    rangeActifRef.current = null;
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape" && popup) {
+      setPopup(null);
+      rangeActifRef.current = null;
+    }
+  }
+
+  // Ferme le popup si on clique ailleurs que dans la liste elle-même.
+  useEffect(() => {
+    if (!popup) return;
+    function handleClickOutside() { setPopup(null); }
+    // Micro-délai pour ne pas fermer immédiatement le clic qui vient d'ouvrir le popup.
+    const t = setTimeout(() => document.addEventListener("mousedown", handleClickOutside), 0);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handleClickOutside); };
+  }, [popup]);
+
+  return (
+    <div className="relative rounded-xl border border-[#E7E6EF] bg-white overflow-hidden
+                     focus-within:border-[#7C6BD6] focus-within:ring-4 focus-within:ring-[#7C6BD6]/15 transition">
+      {/* Barre d'outils */}
+      <div className="flex flex-wrap items-center gap-1 border-b border-[#EEEDF5] bg-[#F8F7FC] px-2 py-1.5">
+        <select
+          onChange={(e) => { if (e.target.value) exec("formatBlock", e.target.value); e.target.value = ""; }}
+          defaultValue=""
+          className="h-7 rounded-lg border border-[#E7E6EF] bg-white px-1.5 text-xs text-[#3A3556] outline-none cursor-pointer"
+          title="Style de paragraphe"
+        >
+          <option value="" disabled>Style</option>
+          <option value="P">Texte normal</option>
+          <option value="H1">Titre 1</option>
+          <option value="H2">Titre 2</option>
+          <option value="H3">Titre 3</option>
+        </select>
+
+        <button type="button" onClick={() => exec("bold")} className={`${barreBoutonCls} font-bold`} title="Gras (Ctrl+B)">G</button>
+        <button type="button" onClick={() => exec("italic")} className={`${barreBoutonCls} italic`} title="Italique (Ctrl+I)">I</button>
+        <button type="button" onClick={() => exec("underline")} className={`${barreBoutonCls} underline`} title="Souligné (Ctrl+U)">S</button>
+
+        <span className="mx-1 h-5 w-px bg-[#E7E6EF]" />
+
+        <button type="button" onClick={() => exec("justifyLeft")} className={barreBoutonCls} title="Aligner à gauche">⯇≡</button>
+        <button type="button" onClick={() => exec("justifyCenter")} className={barreBoutonCls} title="Centrer">≡</button>
+        <button type="button" onClick={() => exec("justifyRight")} className={barreBoutonCls} title="Aligner à droite">≡⯈</button>
+
+        <span className="mx-1 h-5 w-px bg-[#E7E6EF]" />
+
+        <button type="button" onClick={() => exec("insertUnorderedList")} className={barreBoutonCls} title="Liste à puces">• ≡</button>
+
+        <span className="mx-1 h-5 w-px bg-[#E7E6EF]" />
+
+        <div className="flex items-center gap-1">
+          {COULEURS_TEXTE.map((c) => (
+            <button key={c.valeur} type="button" onClick={() => exec("foreColor", c.valeur)}
+              className="h-5 w-5 shrink-0 rounded-full border border-white shadow ring-1 ring-[#E7E6EF]"
+              style={{ backgroundColor: c.valeur }}
+              title={`Couleur : ${c.nom}`} />
+          ))}
+        </div>
+
+        <button type="button" onClick={() => exec("removeFormat")}
+          className={`${barreBoutonCls} ml-auto`} title="Effacer la mise en forme">✕ Effacer</button>
+      </div>
+
+      {/* Astuce discrète */}
+      <p className="px-4 pt-2 text-[11px] text-[#B4B1C4]">
+        Astuce : tapez <span className="font-mono">@</span> pour mentionner un référent/élève,
+        {" "}<span className="font-mono">#</span> pour lier une situation/réunion.
+      </p>
+
+      {/* Zone éditable */}
+      <div
+        ref={ref}
+        contentEditable
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onKeyUp={detecterMention}
+        onClick={detecterMention}
+        data-placeholder={placeholder}
+        suppressContentEditableWarning
+        className={`w-full ${minHeightClass} px-4 py-2.5 text-sm text-[#1B1633] outline-none overflow-y-auto
+                   empty:before:content-[attr(data-placeholder)] empty:before:text-[#B4B1C4]
+                   [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:my-2
+                   [&_h2]:text-base [&_h2]:font-semibold [&_h2]:my-1.5
+                   [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:my-1
+                   [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5`}
+      />
+
+      {/* Popup d'autocomplétion */}
+      {popup && (
+        <div
+          className="fixed z-[9999] w-64 max-h-56 overflow-y-auto rounded-xl border border-[#E7E6EF]
+                     bg-white shadow-xl"
+          style={{ top: popup.top, left: popup.left }}
+          onMouseDown={(e) => e.preventDefault()} // évite de perdre le focus/la sélection avant le clic
+        >
+          {popup.chargement ? (
+            <p className="px-3 py-2.5 text-xs text-[#9A97AD]">Recherche…</p>
+          ) : popup.resultats.length === 0 ? (
+            <p className="px-3 py-2.5 text-xs text-[#B4B1C4] italic">Aucun résultat.</p>
+          ) : (
+            popup.resultats.map((item) => (
+              <button
+                key={`${item.kind}-${item.id}`}
+                type="button"
+                onClick={() => insererResultat(item)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[#F3F2FA] transition"
+              >
+                <span className="shrink-0">{iconePour(item.kind)}</span>
+                <span className="flex-1 min-w-0 truncate text-[#1B1633]">{item.label}</span>
+                {item.sublabel && (
+                  <span className="shrink-0 text-xs text-[#9A97AD]">{item.sublabel}</span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Affichage en lecture seule d'un contenu déjà enregistré.
+   Gère la rétrocompatibilité avec les anciens CR (texte brut,
+   sans aucune balise HTML) en convertissant leurs retours à la
+   ligne en <br> pour un rendu correct.
+   ============================================================ */
+export function ContenuRiche({ html, className = "" }: { html: string; className?: string }) {
+  const contientDuHtml = /<[a-z][\s\S]*>/i.test(html);
+  const contenuAffiche = contientDuHtml ? html : html.replace(/\n/g, "<br/>");
+
+  return (
+    <div
+      className={`text-sm text-[#3A3556] leading-relaxed
+                 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:my-2
+                 [&_h2]:text-base [&_h2]:font-semibold [&_h2]:my-1.5
+                 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:my-1
+                 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 ${className}`}
+      dangerouslySetInnerHTML={{ __html: contenuAffiche }}
+    />
+  );
+}
