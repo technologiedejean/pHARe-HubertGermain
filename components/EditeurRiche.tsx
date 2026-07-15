@@ -207,6 +207,59 @@ export function EditeurRiche({
     detecterMention();
   }
 
+  // La propriété CSS "resize" ne fonctionne pas de façon fiable directement
+  // sur une balise <img> dans les navigateurs. On enveloppe donc chaque image
+  // collée dans un petit conteneur redimensionnable, et l'image remplit ce
+  // conteneur à 100% — c'est la poignée du conteneur qu'on fait glisser.
+  function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    let imageFile: File | null = null;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith("image/")) {
+        imageFile = items[i].getAsFile();
+        break;
+      }
+    }
+    if (!imageFile) return; // pas une image : on laisse le comportement par défaut (texte, etc.)
+
+    e.preventDefault();
+
+    // On sauvegarde la position du curseur avant l'opération asynchrone
+    // (lecture du fichier), sinon la sélection est perdue entre-temps.
+    const sel = window.getSelection();
+    const savedRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const maxLargeur = 400;
+        const echelle    = Math.min(1, maxLargeur / img.naturalWidth);
+        const largeur    = Math.max(40, Math.round(img.naturalWidth * echelle));
+        const hauteur    = Math.max(40, Math.round(img.naturalHeight * echelle));
+
+        const html =
+          `<span contenteditable="false" style="display:inline-block;resize:both;overflow:hidden;` +
+          `width:${largeur}px;height:${hauteur}px;max-width:100%;vertical-align:bottom;">` +
+          `<img src="${dataUrl}" style="width:100%;height:100%;display:block;" /></span>&nbsp;`;
+
+        ref.current?.focus();
+        if (savedRange) {
+          const s = window.getSelection();
+          s?.removeAllRanges();
+          s?.addRange(savedRange);
+        }
+        document.execCommand("insertHTML", false, html);
+        onChange(ref.current?.innerHTML ?? "");
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(imageFile);
+  }
+
   function insererResultat(item: ResultatAutocomplete) {
     if (!rangeActifRef.current) return;
     const sel = window.getSelection();
@@ -312,6 +365,7 @@ export function EditeurRiche({
         contentEditable
         onInput={handleInput}
         onMouseUp={handleInput}
+        onPaste={handlePaste}
         onKeyDown={handleKeyDown}
         onKeyUp={detecterMention}
         onClick={detecterMention}
@@ -323,9 +377,7 @@ export function EditeurRiche({
                    [&_h2]:text-base [&_h2]:font-semibold [&_h2]:my-1.5
                    [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:my-1
                    [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5
-                   [&_img]:inline-block [&_img]:align-middle [&_img]:max-w-full
-                   [&_img]:rounded-lg [&_img]:my-1 [&_img]:resize [&_img]:overflow-hidden
-                   [&_img]:cursor-nwse-resize`}
+                   [&_img]:block [&_img]:rounded-lg`}
       />
 
       {/* Popup d'autocomplétion */}
@@ -380,7 +432,8 @@ export function ContenuRiche({ html, className = "" }: { html: string; className
                  [&_h2]:text-base [&_h2]:font-semibold [&_h2]:my-1.5
                  [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:my-1
                  [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5
-                 [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-lg [&_img]:my-1 ${className}`}
+                 [&_img]:h-full [&_img]:w-full [&_img]:rounded-lg
+                 [&_span]:!resize-none [&_span]:max-w-full ${className}`}
       dangerouslySetInnerHTML={{ __html: contenuAffiche }}
     />
   );
