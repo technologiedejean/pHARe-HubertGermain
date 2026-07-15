@@ -464,6 +464,7 @@ export default function ReferentsPage() {
   const [modalEdit, setModalEdit]     = useState<Referent | null>(null);
   const [modalDelete, setModalDelete] = useState<Referent | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   const loadReferents = useCallback(async () => {
     const { data } = await supabase
@@ -489,24 +490,42 @@ export default function ReferentsPage() {
     init();
   }, [router, loadReferents]);
 
+  // La requête n'était jamais vérifiée : si elle échouait côté serveur (policy,
+  // variable d'environnement manquante, etc.), rien ne se passait visuellement
+  // et on ne pouvait pas savoir pourquoi. On vérifie désormais la réponse et on
+  // affiche l'erreur exacte le cas échéant.
   async function handleToggleActif(ref: Referent) {
-    await fetch("/api/referents", {
+    setToggleError(null);
+    const res = await fetch("/api/referents", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: ref.id, actif: !ref.actif }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      const message = data?.error ?? `Erreur ${res.status} lors de la mise à jour.`;
+      console.error("Échec de la (dés)activation du référent :", message);
+      setToggleError(`${ref.prenom} ${ref.nom} : ${message}`);
+      return;
+    }
     await loadReferents();
   }
 
   async function handleDelete() {
     if (!modalDelete) return;
     setDeleteLoading(true);
-    await fetch("/api/referents", {
+    const res = await fetch("/api/referents", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: modalDelete.id }),
     });
     setDeleteLoading(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      console.error("Échec de la suppression du référent :", data?.error);
+      setToggleError(data?.error ?? `Erreur ${res.status} lors de la suppression.`);
+      return;
+    }
     setModalDelete(null);
     await loadReferents();
   }
@@ -583,6 +602,11 @@ export default function ReferentsPage() {
           </div>
         </header>
         <main className="flex-1 px-5 py-5 space-y-3">
+          {toggleError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {toggleError}
+            </div>
+          )}
           {filtered.length === 0
             ? <p className="py-12 text-center text-sm text-[#9A97AD]">Aucun référent trouvé.</p>
             : filtered.map((r) => (
@@ -621,6 +645,12 @@ export default function ReferentsPage() {
             </button>
           )}
         </div>
+
+        {toggleError && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {toggleError}
+          </div>
+        )}
 
         <div className="mb-5 flex gap-3">
           <div className="relative min-w-[220px] flex-1">
