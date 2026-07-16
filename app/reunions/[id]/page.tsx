@@ -106,22 +106,50 @@ function InfosReunion({ reunion, tousParticipants, onAllerAgenda }: {
    (Idem : composant hors du render de la page.)
    ============================================================ */
 function PanneauCR({
-  cr, editing, canWrite, contenu, setContenu, saving,
-  onStartEdit, onCancelEdit, onSave,
+  cr, editing, canWrite, isAdmin, contenu, setContenu, saving, deleting,
+  onStartEdit, onCancelEdit, onSave, onDelete,
 }: {
   cr: CompteRendu | null;
   editing: boolean;
   canWrite: boolean;
+  isAdmin: boolean;
   contenu: string;
   setContenu: (v: string) => void;
   saving: boolean;
+  deleting: boolean;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSave: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">Compte rendu</p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">Compte rendu</p>
+        {/* Suppression réservée à l'admin, uniquement si un CR existe et qu'on n'est pas déjà en édition */}
+        {isAdmin && cr && !editing && (
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            title="Supprimer le compte rendu"
+            aria-label="Supprimer le compte rendu"
+            className="rounded-lg p-1.5 text-[#B4B1C4] hover:bg-red-50 hover:text-red-500 transition disabled:opacity-50"
+          >
+            {deleting ? (
+              <span className="text-xs">…</span>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
       {editing && canWrite ? (
         <div className="space-y-3">
           <EditeurRiche
@@ -190,6 +218,7 @@ export default function ReunionDetailPage() {
   const [editing, setEditing] = useState(false);
   const [contenu, setContenu] = useState("");
   const [saving, setSaving]   = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     const [reuRes, crRes] = await Promise.all([
@@ -266,8 +295,10 @@ export default function ReunionDetailPage() {
     ...(reunion.participants ?? []),
   ].filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
 
+  const isAdmin = profile.role === "admin";
+
   const canWrite =
-    profile.role === "admin" ||
+    isAdmin ||
     reunion.referent_charge_id === profile.id ||
     (reunion.participants ?? []).some((p) => p.id === profile.id);
 
@@ -294,6 +325,28 @@ export default function ReunionDetailPage() {
     await load();
   }
 
+  async function handleDelete() {
+    if (!isAdmin || !cr) return;
+    const confirme = window.confirm(
+      "Supprimer définitivement ce compte rendu ? Cette action est irréversible."
+    );
+    if (!confirme) return;
+
+    setDeleting(true);
+    const { error } = await supabase.from("comptes_rendus").delete().eq("id", cr.id);
+    setDeleting(false);
+
+    if (error) {
+      console.error("Impossible de supprimer le compte rendu :", error);
+      window.alert("La suppression a échoué. Veuillez réessayer.");
+      return;
+    }
+
+    setCr(null);
+    setEditing(false);
+    setContenu("");
+  }
+
   return (
     <div className="min-h-screen bg-[#FBFBFD] text-[#1B1633]">
 
@@ -307,10 +360,12 @@ export default function ReunionDetailPage() {
         <main className="flex-1 px-5 py-5 space-y-4">
           <InfosReunion reunion={reunion} tousParticipants={tousParticipants} onAllerAgenda={() => router.push("/agenda")} />
           <PanneauCR
-            cr={cr} editing={editing} canWrite={canWrite} contenu={contenu} setContenu={setContenu} saving={saving}
+            cr={cr} editing={editing} canWrite={canWrite} isAdmin={isAdmin} contenu={contenu} setContenu={setContenu}
+            saving={saving} deleting={deleting}
             onStartEdit={() => { setEditing(true); setContenu(cr?.contenu ?? ""); }}
             onCancelEdit={() => { setEditing(false); setContenu(cr?.contenu ?? ""); }}
             onSave={handleSave}
+            onDelete={handleDelete}
           />
         </main>
       </div>
@@ -323,10 +378,12 @@ export default function ReunionDetailPage() {
         <div className="space-y-6">
           <InfosReunion reunion={reunion} tousParticipants={tousParticipants} onAllerAgenda={() => router.push("/agenda")} />
           <PanneauCR
-            cr={cr} editing={editing} canWrite={canWrite} contenu={contenu} setContenu={setContenu} saving={saving}
+            cr={cr} editing={editing} canWrite={canWrite} isAdmin={isAdmin} contenu={contenu} setContenu={setContenu}
+            saving={saving} deleting={deleting}
             onStartEdit={() => { setEditing(true); setContenu(cr?.contenu ?? ""); }}
             onCancelEdit={() => { setEditing(false); setContenu(cr?.contenu ?? ""); }}
             onSave={handleSave}
+            onDelete={handleDelete}
           />
         </div>
       </div>
