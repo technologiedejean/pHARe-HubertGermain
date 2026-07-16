@@ -3,7 +3,7 @@
 // Créer le fichier : app/statistiques/page.tsx
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -14,6 +14,10 @@ type Profile = { id: string; role: "admin" | "referent" };
 
 type StatItem = { label: string; count: number; couleur?: string };
 
+type RawQualif = { situation_id: string | null; label: string };
+
+type Demographie = { genres: Set<string>; niveaux: Set<string> };
+
 type Stats = {
   totalSituations:   number;
   parStatut:         StatItem[];
@@ -22,9 +26,6 @@ type Stats = {
   victimesParNiveau: StatItem[];
   intimidateursParGenre:  StatItem[];
   intimidateursParNiveau: StatItem[];
-  parMotif:          StatItem[];
-  parManifestation:  StatItem[];
-  parLieu:           StatItem[];
 };
 
 /* ============================================================
@@ -38,6 +39,22 @@ const PALETTE = [
 function couleur(i: number): string {
   return PALETTE[i % PALETTE.length];
 }
+
+// Couleurs fixes pour la comparaison victimes / intimidateurs
+const COULEUR_VICTIMES      = "#6656B8"; // violet (identité pHARe)
+const COULEUR_INTIMIDATEURS = "#FB923C"; // orange
+
+// Options des deux filtres appliqués aux graphiques de Qualifications
+const OPTIONS_GENRE = [
+  { value: "masculin", label: "Garçons" },
+  { value: "feminin",  label: "Filles" },
+];
+const OPTIONS_NIVEAU = [
+  { value: "6ème", label: "6ème" },
+  { value: "5ème", label: "5ème" },
+  { value: "4ème", label: "4ème" },
+  { value: "3ème", label: "3ème" },
+];
 
 /* ============================================================
    Helpers
@@ -64,6 +81,24 @@ function compterParCle<T>(items: T[], fn: (item: T) => string): StatItem[] {
   return Array.from(map.entries())
     .sort((a, b) => b[1] - a[1])
     .map(([label, count], i) => ({ label, count, couleur: couleur(i) }));
+}
+
+// Une situation est-elle concernée par le filtre "genre" ?
+// Si elle n'a aucun élève masculin/féminin identifié (élève "autre" ou
+// non renseigné uniquement), le filtre ne s'applique pas et elle passe.
+function passeFiltreGenre(demo: Demographie | undefined, selection: Set<string>): boolean {
+  if (!demo) return true;
+  const pertinents = ["masculin", "feminin"].filter((g) => demo.genres.has(g));
+  if (pertinents.length === 0) return true;
+  return pertinents.some((g) => selection.has(g));
+}
+
+// Même logique pour le filtre "niveau" (6e/5e/4e/3e uniquement).
+function passeFiltreNiveau(demo: Demographie | undefined, selection: Set<string>): boolean {
+  if (!demo) return true;
+  const pertinents = OPTIONS_NIVEAU.map((o) => o.value).filter((n) => demo.niveaux.has(n));
+  if (pertinents.length === 0) return true;
+  return pertinents.some((n) => selection.has(n));
 }
 
 /* ============================================================
@@ -98,10 +133,8 @@ function Donut({ data, titre, total }: { data: StatItem[]; titre: string; total:
     <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5">
       <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-4">{titre}</p>
       <div className="flex items-center gap-5">
-        {/* SVG donut */}
         <div className="shrink-0">
           <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
-            {/* Fond */}
             <circle cx={CX} cy={CY} r={R} fill="none" stroke="#F3F2FA" strokeWidth={STROKE} />
             {arcs.map((arc, i) => (
               <circle key={i} cx={CX} cy={CY} r={R} fill="none"
@@ -112,12 +145,10 @@ function Donut({ data, titre, total }: { data: StatItem[]; titre: string; total:
                 style={{ transition: "stroke-dasharray 0.5s ease" }}
               />
             ))}
-            {/* Total au centre */}
             <text x={CX} y={CY - 4} textAnchor="middle" fontSize="14" fontWeight="700" fill="#1B1633">{total}</text>
             <text x={CX} y={CY + 10} textAnchor="middle" fontSize="8" fill="#9A97AD">total</text>
           </svg>
         </div>
-        {/* Légende */}
         <div className="flex-1 space-y-1.5 min-w-0">
           {data.slice(0, 8).map((d, i) => (
             <div key={i} className="flex items-center gap-2">
@@ -141,37 +172,184 @@ function Donut({ data, titre, total }: { data: StatItem[]; titre: string; total:
 /* ============================================================
    Graphique barres horizontales
    ============================================================ */
-function BarresH({ data, titre }: { data: StatItem[]; titre: string }) {
-  if (data.length === 0) return (
+function BarresH({ data, titre, sousTitre }: { data: StatItem[]; titre: string; sousTitre?: string }) {
+  return (
     <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5">
-      <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-4">{titre}</p>
-      <p className="text-sm text-[#B4B1C4] text-center py-6">Aucune donnée</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">{titre}</p>
+      {sousTitre && <p className="text-[11px] text-[#B4B1C4] mb-3 mt-0.5">{sousTitre}</p>}
+      {data.length === 0 ? (
+        <p className="text-sm text-[#B4B1C4] text-center py-6">Aucune donnée</p>
+      ) : (
+        <div className={`space-y-2.5 ${sousTitre ? "" : "mt-4"}`}>
+          {(() => {
+            const max = Math.max(...data.map((d) => d.count));
+            return data.map((d, i) => (
+              <div key={i} className="group">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs text-[#3A3556] truncate flex-1 mr-2">{d.label}</span>
+                  <span className="text-xs font-semibold text-[#1B1633] shrink-0">{d.count}</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-[#F3F2FA] overflow-hidden">
+                  <div
+                    className="h-2 rounded-full transition-all duration-700"
+                    style={{
+                      width: `${(d.count / max) * 100}%`,
+                      backgroundColor: d.couleur ?? PALETTE[i % PALETTE.length],
+                    }}
+                  />
+                </div>
+              </div>
+            ));
+          })()}
+        </div>
+      )}
     </div>
   );
+}
 
-  const max = Math.max(...data.map((d) => d.count));
+/* ============================================================
+   Graphique barres groupées : comparaison Victimes / Intimidateurs
+   ============================================================ */
+type LigneComparaison = { label: string; victimes: number; intimidateurs: number };
+
+function BarresComparaison({
+  victimesData, intimidateursData, titre,
+}: {
+  victimesData: StatItem[];
+  intimidateursData: StatItem[];
+  titre: string;
+}) {
+  const labels = Array.from(new Set([
+    ...victimesData.map((d) => d.label),
+    ...intimidateursData.map((d) => d.label),
+  ]));
+
+  const lignes: LigneComparaison[] = labels.map((label) => ({
+    label,
+    victimes:      victimesData.find((d) => d.label === label)?.count ?? 0,
+    intimidateurs: intimidateursData.find((d) => d.label === label)?.count ?? 0,
+  })).sort((a, b) => (b.victimes + b.intimidateurs) - (a.victimes + a.intimidateurs));
+
+  const max = Math.max(1, ...lignes.map((l) => Math.max(l.victimes, l.intimidateurs)));
+  const totalVictimes      = victimesData.reduce((s, d) => s + d.count, 0);
+  const totalIntimidateurs = intimidateursData.reduce((s, d) => s + d.count, 0);
+
+  if (lignes.length === 0 || (totalVictimes === 0 && totalIntimidateurs === 0)) {
+    return (
+      <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-4">{titre}</p>
+        <p className="text-sm text-[#B4B1C4] text-center py-6">Aucune donnée</p>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5">
-      <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-4">{titre}</p>
-      <div className="space-y-2.5">
-        {data.map((d, i) => (
-          <div key={i} className="group">
-            <div className="flex items-center justify-between mb-0.5">
-              <span className="text-xs text-[#3A3556] truncate flex-1 mr-2">{d.label}</span>
-              <span className="text-xs font-semibold text-[#1B1633] shrink-0">{d.count}</span>
-            </div>
-            <div className="h-2 w-full rounded-full bg-[#F3F2FA] overflow-hidden">
-              <div
-                className="h-2 rounded-full transition-all duration-700"
-                style={{
-                  width: `${(d.count / max) * 100}%`,
-                  backgroundColor: d.couleur ?? PALETTE[i % PALETTE.length],
-                }}
-              />
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">{titre}</p>
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5 text-[11px] text-[#6C6A80]">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COULEUR_VICTIMES }} />
+            Victimes ({totalVictimes})
+          </span>
+          <span className="flex items-center gap-1.5 text-[11px] text-[#6C6A80]">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COULEUR_INTIMIDATEURS }} />
+            Intimidateurs ({totalIntimidateurs})
+          </span>
+        </div>
+      </div>
+      <div className="space-y-4">
+        {lignes.map((l, i) => (
+          <div key={i}>
+            <p className="text-xs font-medium text-[#3A3556] mb-1.5">{l.label}</p>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div className="h-2.5 flex-1 rounded-full bg-[#F3F2FA] overflow-hidden">
+                  <div className="h-2.5 rounded-full transition-all duration-700"
+                    style={{ width: `${(l.victimes / max) * 100}%`, backgroundColor: COULEUR_VICTIMES }} />
+                </div>
+                <span className="w-6 shrink-0 text-right text-xs font-semibold text-[#1B1633]">{l.victimes}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="h-2.5 flex-1 rounded-full bg-[#F3F2FA] overflow-hidden">
+                  <div className="h-2.5 rounded-full transition-all duration-700"
+                    style={{ width: `${(l.intimidateurs / max) * 100}%`, backgroundColor: COULEUR_INTIMIDATEURS }} />
+                </div>
+                <span className="w-6 shrink-0 text-right text-xs font-semibold text-[#1B1633]">{l.intimidateurs}</span>
+              </div>
             </div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Groupe de cases à cocher (filtre) avec bouton Tous / Aucun
+   ============================================================ */
+function FiltreCheckboxes({
+  titre, options, selection, onChange,
+}: {
+  titre: string;
+  options: { value: string; label: string }[];
+  selection: Set<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  const tousCoches = options.every((o) => selection.has(o.value));
+
+  function toggle(value: string) {
+    const next = new Set(selection);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    onChange(next);
+  }
+
+  return (
+    <div className="flex-1 min-w-[220px]">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">{titre}</p>
+        <div className="flex gap-1">
+          <button
+            onClick={() => onChange(new Set(options.map((o) => o.value)))}
+            className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+              tousCoches ? "bg-[#EFEAFB] text-[#6656B8]" : "text-[#B4B1C4] hover:bg-[#F3F2FA]"
+            }`}
+          >
+            Tous
+          </button>
+          <button
+            onClick={() => onChange(new Set())}
+            className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+              selection.size === 0 ? "bg-[#EFEAFB] text-[#6656B8]" : "text-[#B4B1C4] hover:bg-[#F3F2FA]"
+            }`}
+          >
+            Aucun
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {options.map((o) => {
+          const coche = selection.has(o.value);
+          return (
+            <label
+              key={o.value}
+              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs cursor-pointer transition ${
+                coche
+                  ? "border-[#D9D0F5] bg-[#F5F3FF] text-[#3A3556]"
+                  : "border-[#E7E6EF] bg-white text-[#9A97AD]"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={coche}
+                onChange={() => toggle(o.value)}
+                style={{ accentColor: "#6656B8" }}
+                className="h-3.5 w-3.5 rounded"
+              />
+              {o.label}
+            </label>
+          );
+        })}
       </div>
     </div>
   );
@@ -201,31 +379,43 @@ export default function StatistiquesPage() {
   const [stats, setStats]       = useState<Stats | null>(null);
   const [loading, setLoading]   = useState(true);
 
+  // Données brutes des qualifications (avec situation_id) + démographie par situation.
+  // Conservées à part car recalculées côté client à chaque changement de filtre,
+  // sans nouvel appel réseau.
+  const [rawMotifs, setRawMotifs]   = useState<RawQualif[]>([]);
+  const [rawManifs, setRawManifs]   = useState<RawQualif[]>([]);
+  const [rawLieux, setRawLieux]     = useState<RawQualif[]>([]);
+  const [demographies, setDemographies] = useState<Map<string, Demographie>>(new Map());
+
+  // Filtres — tout coché par défaut.
+  const [selectionGenre, setSelectionGenre]   = useState<Set<string>>(new Set(OPTIONS_GENRE.map((o) => o.value)));
+  const [selectionNiveau, setSelectionNiveau] = useState<Set<string>>(new Set(OPTIONS_NIVEAU.map((o) => o.value)));
+
   const loadStats = useCallback(async () => {
     // ── 1. Situations ──────────────────────────────────────
     const { data: situations } = await supabase
       .from("situations")
       .select("id, statut, gravite");
 
-    // ── 2. Acteurs (victimes + intimidateurs) ──────────────
+    // ── 2. Acteurs (victimes + intimidateurs), avec situation_id ──
     const { data: acteurs } = await supabase
       .from("situation_eleves")
-      .select(`role, eleve:eleves(genre, classe)`);
+      .select(`situation_id, role, eleve:eleves(genre, classe)`);
 
-    // ── 3. Motifs cochés ───────────────────────────────────
+    // ── 3. Motifs cochés, avec situation_id ────────────────
     const { data: sitMotifs } = await supabase
       .from("situation_motifs")
-      .select(`motif:motifs(label)`);
+      .select(`situation_id, motif:motifs(label)`);
 
-    // ── 4. Manifestations cochées ──────────────────────────
+    // ── 4. Manifestations cochées, avec situation_id ───────
     const { data: sitManifs } = await supabase
       .from("situation_manifestations")
-      .select(`manifestation:manifestations(label)`);
+      .select(`situation_id, manifestation:manifestations(label)`);
 
-    // ── 5. Lieux cochés ────────────────────────────────────
+    // ── 5. Lieux cochés, avec situation_id ──────────────────
     const { data: sitLieux } = await supabase
       .from("situation_lieux")
-      .select(`lieu:lieux(label)`);
+      .select(`situation_id, lieu:lieux(label)`);
 
     // ── Calculs ────────────────────────────────────────────
     const sits    = situations ?? [];
@@ -275,22 +465,30 @@ export default function StatistiquesPage() {
         intimidateurs.filter((a) => a.eleve),
         (a) => classeVersNiveau(a.eleve?.classe)
       ),
-
-      parMotif: compterParCle(
-        (sitMotifs ?? []) as any[],
-        (m) => (m.motif as any)?.label ?? "Inconnu"
-      ),
-
-      parManifestation: compterParCle(
-        (sitManifs ?? []) as any[],
-        (m) => (m.manifestation as any)?.label ?? "Inconnu"
-      ),
-
-      parLieu: compterParCle(
-        (sitLieux ?? []) as any[],
-        (m) => (m.lieu as any)?.label ?? "Inconnu"
-      ),
     });
+
+    // ── Démographie par situation (pour les filtres) ───────
+    // Un élève (victime ou intimidateur) "vote" son genre et son niveau
+    // pour toutes les situations où il apparaît.
+    const demoMap = new Map<string, Demographie>();
+    for (const a of acteursData) {
+      if (!a.situation_id || !a.eleve) continue;
+      const entry = demoMap.get(a.situation_id) ?? { genres: new Set<string>(), niveaux: new Set<string>() };
+      if (a.eleve.genre) entry.genres.add(a.eleve.genre);
+      entry.niveaux.add(classeVersNiveau(a.eleve.classe));
+      demoMap.set(a.situation_id, entry);
+    }
+    setDemographies(demoMap);
+
+    setRawMotifs(((sitMotifs ?? []) as any[]).map((m) => ({
+      situation_id: m.situation_id, label: (m.motif as any)?.label ?? "Inconnu",
+    })));
+    setRawManifs(((sitManifs ?? []) as any[]).map((m) => ({
+      situation_id: m.situation_id, label: (m.manifestation as any)?.label ?? "Inconnu",
+    })));
+    setRawLieux(((sitLieux ?? []) as any[]).map((m) => ({
+      situation_id: m.situation_id, label: (m.lieu as any)?.label ?? "Inconnu",
+    })));
 
     setLoading(false);
   }, []);
@@ -306,6 +504,37 @@ export default function StatistiquesPage() {
     init();
   }, [router, loadStats]);
 
+  // Filtrage + comptage des 3 graphiques de qualifications, recalculé
+  // uniquement côté client à chaque changement de sélection.
+  const situationRetenue = useCallback((situationId: string | null) => {
+    if (!situationId) return true;
+    const demo = demographies.get(situationId);
+    return passeFiltreGenre(demo, selectionGenre) && passeFiltreNiveau(demo, selectionNiveau);
+  }, [demographies, selectionGenre, selectionNiveau]);
+
+  const parMotif = useMemo(
+    () => compterParCle(rawMotifs.filter((m) => situationRetenue(m.situation_id)), (m) => m.label),
+    [rawMotifs, situationRetenue]
+  );
+  const parManifestation = useMemo(
+    () => compterParCle(rawManifs.filter((m) => situationRetenue(m.situation_id)), (m) => m.label),
+    [rawManifs, situationRetenue]
+  );
+  const parLieu = useMemo(
+    () => compterParCle(rawLieux.filter((m) => situationRetenue(m.situation_id)), (m) => m.label),
+    [rawLieux, situationRetenue]
+  );
+
+  // Nombre de situations avec démographie connue qui passent les filtres,
+  // pour donner un repère à l'utilisateur.
+  const { situationsRetenues, situationsTotal } = useMemo(() => {
+    const ids = Array.from(demographies.keys());
+    return {
+      situationsTotal: ids.length,
+      situationsRetenues: ids.filter((id) => situationRetenue(id)).length,
+    };
+  }, [demographies, situationRetenue]);
+
   if (loading || !stats || !profile) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#FBFBFD]">
@@ -316,6 +545,9 @@ export default function StatistiquesPage() {
 
   const totalVictimes      = stats.victimesParGenre.reduce((s, d) => s + d.count, 0);
   const totalIntimidateurs = stats.intimidateursParGenre.reduce((s, d) => s + d.count, 0);
+
+  const filtresActifs =
+    selectionGenre.size < OPTIONS_GENRE.length || selectionNiveau.size < OPTIONS_NIVEAU.length;
 
   /* ── Contenu ─────────────────────────────────────────────── */
   const Contenu = () => (
@@ -338,6 +570,20 @@ export default function StatistiquesPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Donut data={stats.parStatut}  titre="Répartition par statut"  total={stats.totalSituations} />
           <BarresH data={stats.parGravite} titre="Répartition par gravité" />
+        </div>
+      </section>
+
+      {/* ── Genre : victimes vs intimidateurs (comparaison directe) ── */}
+      <section>
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-3">
+          Genre — victimes vs intimidateurs
+        </p>
+        <div className="grid grid-cols-1 gap-4">
+          <BarresComparaison
+            victimesData={stats.victimesParGenre}
+            intimidateursData={stats.intimidateursParGenre}
+            titre="Répartition par genre"
+          />
         </div>
       </section>
 
@@ -365,11 +611,27 @@ export default function StatistiquesPage() {
 
       {/* ── Qualifications ── */}
       <section>
-        <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-3">Qualifications</p>
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">Qualifications</p>
+          {filtresActifs && (
+            <span className="rounded-full bg-[#F5F3FF] px-2.5 py-1 text-[11px] text-[#6656B8]">
+              {situationsRetenues} / {situationsTotal} situations correspondent aux filtres
+            </span>
+          )}
+        </div>
+
+        {/* Filtres */}
+        <div className="rounded-2xl border border-[#EEEDF5] bg-white p-4 mb-4">
+          <div className="flex flex-wrap gap-6">
+            <FiltreCheckboxes titre="Genre"  options={OPTIONS_GENRE}  selection={selectionGenre}  onChange={setSelectionGenre} />
+            <FiltreCheckboxes titre="Niveau" options={OPTIONS_NIVEAU} selection={selectionNiveau} onChange={setSelectionNiveau} />
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <BarresH data={stats.parMotif}         titre="🎯 Motifs d'intimidation"  />
-          <BarresH data={stats.parManifestation} titre="⚡ Manifestations"          />
-          <BarresH data={stats.parLieu}          titre="📍 Lieux"                   />
+          <BarresH data={parMotif}         titre="🎯 Motifs d'intimidation"  />
+          <BarresH data={parManifestation} titre="⚡ Manifestations"          />
+          <BarresH data={parLieu}          titre="📍 Lieux"                   />
         </div>
       </section>
 
