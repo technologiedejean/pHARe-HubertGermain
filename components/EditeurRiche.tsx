@@ -92,6 +92,13 @@ export function EditeurRiche({
     chargement: boolean;
   } | null>(null);
 
+  // Survol d'un lien : affiche un petit bouton "✏️" permettant de remplacer
+  // son texte affiché (ex. transformer "#Réunion parents 6A" en "Cliquer ici"),
+  // sans jamais toucher à sa destination (href).
+  const [lienSurvole, setLienSurvole] = useState<{ el: HTMLAnchorElement; top: number; left: number } | null>(null);
+  const [lienEnEdition, setLienEnEdition] = useState<{ el: HTMLAnchorElement; valeur: string; top: number; left: number } | null>(null);
+  const timerSurvolRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // On ne réinjecte le HTML dans la zone éditable qu'une seule fois au montage
   // (ou si "value" change de l'extérieur, ex. annulation) — jamais à chaque
   // frappe, sinon le curseur saute au début à chaque caractère tapé.
@@ -295,6 +302,47 @@ export function EditeurRiche({
     }
   }
 
+  // Repère le lien survolé (mention @élève, référence #situation/#réunion, ou
+  // tout autre lien) et positionne le petit bouton "✏️" juste au-dessus.
+  function annulerFermetureHover() {
+    if (timerSurvolRef.current) { clearTimeout(timerSurvolRef.current); timerSurvolRef.current = null; }
+  }
+
+  function programmerFermetureHover() {
+    annulerFermetureHover();
+    timerSurvolRef.current = setTimeout(() => setLienSurvole(null), 200);
+  }
+
+  function handleMouseOverEditeur(e: React.MouseEvent<HTMLDivElement>) {
+    const cible = (e.target as HTMLElement).closest("a");
+    if (!cible || !ref.current?.contains(cible)) return;
+    annulerFermetureHover();
+    const rect = cible.getBoundingClientRect();
+    setLienSurvole({ el: cible as HTMLAnchorElement, top: rect.top - 34, left: rect.left });
+  }
+
+  function handleMouseOutEditeur() {
+    programmerFermetureHover();
+  }
+
+  function ouvrirEditionLien() {
+    if (!lienSurvole) return;
+    annulerFermetureHover();
+    const texteActuel = (lienSurvole.el.textContent ?? "").replace(/^[@#]/, "");
+    setLienEnEdition({ el: lienSurvole.el, valeur: texteActuel, top: lienSurvole.top, left: lienSurvole.left });
+    setLienSurvole(null);
+  }
+
+  function validerEditionLien() {
+    if (!lienEnEdition) return;
+    const texte = lienEnEdition.valeur.trim();
+    if (texte) {
+      lienEnEdition.el.textContent = texte;
+      onChange(ref.current?.innerHTML ?? "");
+    }
+    setLienEnEdition(null);
+  }
+
   // Ferme le popup uniquement si le clic a lieu VRAIMENT en dehors de celui-ci.
   // (Avant ce correctif, tout mousedown fermait le popup avant même que le
   // clic sur un résultat n'ait le temps d'être traité, empêchant toute
@@ -372,6 +420,8 @@ export function EditeurRiche({
         onKeyDown={handleKeyDown}
         onKeyUp={detecterMention}
         onClick={detecterMention}
+        onMouseOver={handleMouseOverEditeur}
+        onMouseOut={handleMouseOutEditeur}
         data-placeholder={placeholder}
         suppressContentEditableWarning
         className={`w-full ${minHeightClass} px-4 py-2.5 text-sm text-[#1B1633] outline-none overflow-y-auto
@@ -382,6 +432,55 @@ export function EditeurRiche({
                    [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5
                    [&_img]:block [&_img]:rounded-lg`}
       />
+
+      {/* Bouton flottant : survol d'un lien */}
+      {lienSurvole && !lienEnEdition && (
+        <button
+          type="button"
+          onClick={ouvrirEditionLien}
+          onMouseEnter={annulerFermetureHover}
+          onMouseLeave={programmerFermetureHover}
+          className="fixed z-[9999] flex items-center gap-1 rounded-lg border border-[#E7E6EF]
+                     bg-white px-2 py-1 text-xs font-medium text-[#3A3556] shadow-lg hover:bg-[#F3F2FA] transition"
+          style={{ top: lienSurvole.top, left: lienSurvole.left }}
+        >
+          ✏️ Texte du lien
+        </button>
+      )}
+
+      {/* Popup de saisie du texte de remplacement */}
+      {lienEnEdition && (
+        <div
+          className="fixed z-[9999] w-64 rounded-xl border border-[#E7E6EF] bg-white p-3 shadow-xl space-y-2"
+          style={{ top: lienEnEdition.top, left: lienEnEdition.left }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <p className="text-xs font-medium text-[#3A3556]">Texte affiché pour ce lien</p>
+          <input
+            type="text"
+            autoFocus
+            value={lienEnEdition.valeur}
+            onChange={(e) => setLienEnEdition((p) => (p ? { ...p, valeur: e.target.value } : p))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); validerEditionLien(); }
+              if (e.key === "Escape") setLienEnEdition(null);
+            }}
+            placeholder="Ex. : Cliquer ici"
+            className="w-full rounded-lg border border-[#E7E6EF] bg-white px-2.5 py-1.5 text-sm text-[#1B1633]
+                       outline-none focus:border-[#7C6BD6] focus:ring-2 focus:ring-[#7C6BD6]/15"
+          />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setLienEnEdition(null)}
+              className="flex-1 rounded-lg border border-[#E7E6EF] px-2 py-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition">
+              Annuler
+            </button>
+            <button type="button" onClick={validerEditionLien}
+              className="flex-1 rounded-lg bg-[#1A1440] px-2 py-1.5 text-xs text-white hover:bg-[#2A1E5C] transition">
+              Valider
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Popup d'autocomplétion */}
       {popup && (
