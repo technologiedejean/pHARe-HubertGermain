@@ -42,6 +42,7 @@ const MENTION_CLASS =
   "cr-mention inline-flex items-center rounded-full bg-[#F5F3FF] px-1.5 py-0.5 text-[#6656B8] font-medium";
 const REFERENCE_CLASS =
   "cr-reference inline-flex items-center rounded-full bg-[#EFF6FF] px-1.5 py-0.5 text-blue-700 font-medium no-underline hover:underline";
+const URL_LINK_CLASS = "cr-url-link text-blue-600 underline break-all";
 
 type ResultatAutocomplete = {
   id: string;
@@ -209,7 +210,40 @@ export function EditeurRiche({
     lancerRechercheDebouncee(trigger, requete);
   }, []);
 
+  // Transforme une URL tapée (pas collée) en vrai lien dès qu'on appuie sur
+  // espace juste après — le mot qui précède l'espace est vérifié.
+  function linkifierSiTapee() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !ref.current) return;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed || range.startContainer.nodeType !== Node.TEXT_NODE) return;
+    if (!ref.current.contains(range.startContainer)) return;
+
+    const texte = range.startContainer.textContent ?? "";
+    const caret = range.startOffset;
+    if (caret === 0 || texte[caret - 1] !== " ") return; // on ne réagit qu'à un espace tout juste tapé
+
+    const avantEspace = texte.slice(0, caret - 1);
+    const match = avantEspace.match(/(https?:\/\/\S+)$/i);
+    if (!match) return;
+
+    const url        = match[1];
+    const startIndex = avantEspace.length - url.length;
+
+    const urlRange = document.createRange();
+    urlRange.setStart(range.startContainer, startIndex);
+    urlRange.setEnd(range.startContainer, caret - 1);
+
+    const s = window.getSelection();
+    s?.removeAllRanges();
+    s?.addRange(urlRange);
+
+    const html = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="${URL_LINK_CLASS}">${escapeHtml(url)}</a>`;
+    document.execCommand("insertHTML", false, html);
+  }
+
   function handleInput() {
+    linkifierSiTapee();
     onChange(ref.current?.innerHTML ?? "");
     detecterMention();
   }
@@ -229,7 +263,23 @@ export function EditeurRiche({
         break;
       }
     }
-    if (!imageFile) return; // pas une image : on laisse le comportement par défaut (texte, etc.)
+    if (!imageFile) {
+      // Pas une image : si le texte collé contient une URL brute, on la
+      // transforme immédiatement en vrai lien cliquable.
+      const texte = e.clipboardData.getData("text/plain");
+      if (texte && /https?:\/\/\S+/i.test(texte)) {
+        e.preventDefault();
+        const htmlAvecLiens = escapeHtml(texte)
+          .replace(/\n/g, "<br/>")
+          .replace(
+            /(https?:\/\/[^\s<]+)/gi,
+            (url) => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="${URL_LINK_CLASS}">${url}</a>`
+          );
+        document.execCommand("insertHTML", false, htmlAvecLiens);
+        onChange(ref.current?.innerHTML ?? "");
+      }
+      return; // sinon, comportement de collage par défaut
+    }
 
     e.preventDefault();
 
@@ -316,6 +366,11 @@ export function EditeurRiche({
   function handleMouseOverEditeur(e: React.MouseEvent<HTMLDivElement>) {
     const cible = (e.target as HTMLElement).closest("a");
     if (!cible || !ref.current?.contains(cible)) return;
+    // Uniquement les liens http(s) bruts (URL tapées/collées) — jamais les
+    // mentions/références internes, qui pointent vers des chemins relatifs
+    // comme "/eleves/..." ou "/situations/...".
+    const href = cible.getAttribute("href") ?? "";
+    if (!/^https?:\/\//i.test(href)) return;
     annulerFermetureHover();
     const rect = cible.getBoundingClientRect();
     setLienSurvole({ el: cible as HTMLAnchorElement, top: rect.top - 34, left: rect.left });
@@ -539,5 +594,4 @@ export function ContenuRiche({ html, className = "" }: { html: string; className
       dangerouslySetInnerHTML={{ __html: contenuAffiche }}
     />
   );
-  
 }
