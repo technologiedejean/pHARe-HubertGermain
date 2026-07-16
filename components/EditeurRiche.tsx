@@ -539,4 +539,5 @@ export function ContenuRiche({ html, className = "" }: { html: string; className
       dangerouslySetInnerHTML={{ __html: contenuAffiche }}
     />
   );
+  
 }
