@@ -1,4 +1,4 @@
-// >>> Ce fichier REMPLACE : components/EditeurRiche.tsx <<<
+// >>> Ce fichier REMPLACE : components/EditeurRiche.tsx <
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
@@ -35,9 +35,6 @@ const barreBoutonCls =
   "flex h-7 min-w-[28px] items-center justify-center rounded-lg border border-[#E7E6EF] " +
   "bg-white px-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition";
 
-// Classes utilisées à la fois ici (barre d'aperçu) et injectées dans le HTML
-// stocké — écrites en dur ici pour que Tailwind les détecte et génère le CSS
-// correspondant, même si elles finissent dans une chaîne insérée dynamiquement.
 const MENTION_CLASS =
   "cr-mention inline-flex items-center rounded-full bg-[#F5F3FF] px-1.5 py-0.5 text-[#6656B8] font-medium";
 const REFERENCE_CLASS =
@@ -93,16 +90,13 @@ export function EditeurRiche({
     chargement: boolean;
   } | null>(null);
 
-  // Survol d'un lien : affiche un petit bouton "✏️" permettant de remplacer
-  // son texte affiché (ex. transformer "#Réunion parents 6A" en "Cliquer ici"),
-  // sans jamais toucher à sa destination (href).
   const [lienSurvole, setLienSurvole] = useState<{ el: HTMLAnchorElement; top: number; left: number } | null>(null);
-  const [lienEnEdition, setLienEnEdition] = useState<{ el: HTMLAnchorElement; valeur: string; top: number; left: number } | null>(null);
+  const [lienEnEdition, setLienEnEdition] = useState<{ el: HTMLAnchorElement; valeur: string; url: string; top: number; left: number } | null>(null);
   const timerSurvolRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // On ne réinjecte le HTML dans la zone éditable qu'une seule fois au montage
-  // (ou si "value" change de l'extérieur, ex. annulation) — jamais à chaque
-  // frappe, sinon le curseur saute au début à chaque caractère tapé.
+  const rangeLienRef = useRef<Range | null>(null);
+  const [creationLien, setCreationLien] = useState<{ top: number; left: number; texte: string; url: string } | null>(null);
+
   useEffect(() => {
     if (ref.current && ref.current.innerHTML !== value) {
       ref.current.innerHTML = value || "";
@@ -172,9 +166,6 @@ export function EditeurRiche({
     timerRechercheRef.current = setTimeout(() => rechercher(trigger, requete), 200);
   }
 
-  // Détecte si le curseur est actuellement en train de saisir un "@..." ou
-  // "#..." (sans espace depuis le déclencheur), et met à jour/ouvre le popup
-  // d'autocomplétion en conséquence. Sinon, ferme le popup.
   const detecterMention = useCallback(() => {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || !ref.current) { setPopup(null); return; }
@@ -210,8 +201,6 @@ export function EditeurRiche({
     lancerRechercheDebouncee(trigger, requete);
   }, []);
 
-  // Transforme une URL tapée (pas collée) en vrai lien dès qu'on appuie sur
-  // espace juste après — le mot qui précède l'espace est vérifié.
   function linkifierSiTapee() {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || !ref.current) return;
@@ -221,7 +210,7 @@ export function EditeurRiche({
 
     const texte = range.startContainer.textContent ?? "";
     const caret = range.startOffset;
-    if (caret === 0 || texte[caret - 1] !== " ") return; // on ne réagit qu'à un espace tout juste tapé
+    if (caret === 0 || texte[caret - 1] !== " ") return;
 
     const avantEspace = texte.slice(0, caret - 1);
     const match = avantEspace.match(/(https?:\/\/\S+)$/i);
@@ -248,10 +237,6 @@ export function EditeurRiche({
     detecterMention();
   }
 
-  // La propriété CSS "resize" ne fonctionne pas de façon fiable directement
-  // sur une balise <img> dans les navigateurs. On enveloppe donc chaque image
-  // collée dans un petit conteneur redimensionnable, et l'image remplit ce
-  // conteneur à 100% — c'est la poignée du conteneur qu'on fait glisser.
   function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -264,8 +249,6 @@ export function EditeurRiche({
       }
     }
     if (!imageFile) {
-      // Pas une image : si le texte collé contient une URL brute, on la
-      // transforme immédiatement en vrai lien cliquable.
       const texte = e.clipboardData.getData("text/plain");
       if (texte && /https?:\/\/\S+/i.test(texte)) {
         e.preventDefault();
@@ -278,13 +261,11 @@ export function EditeurRiche({
         document.execCommand("insertHTML", false, htmlAvecLiens);
         onChange(ref.current?.innerHTML ?? "");
       }
-      return; // sinon, comportement de collage par défaut
+      return;
     }
 
     e.preventDefault();
 
-    // On sauvegarde la position du curseur avant l'opération asynchrone
-    // (lecture du fichier), sinon la sélection est perdue entre-temps.
     const sel = window.getSelection();
     const savedRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
 
@@ -298,9 +279,6 @@ export function EditeurRiche({
         const largeur    = Math.max(40, Math.round(img.naturalWidth * echelle));
         const ratio      = img.naturalWidth / img.naturalHeight;
 
-        // "resize: horizontal" (et non "both") + "aspect-ratio" fixé : on ne
-        // peut faire glisser que la largeur, la hauteur suit automatiquement
-        // pour conserver les proportions — impossible de déformer l'image.
         const html =
           `<span contenteditable="false" style="display:inline-block;resize:horizontal;overflow:hidden;` +
           `width:${largeur}px;aspect-ratio:${ratio};max-width:100%;vertical-align:bottom;">` +
@@ -329,7 +307,6 @@ export function EditeurRiche({
 
     let html: string;
     if (item.kind === "referent") {
-      // Pas de fiche individuelle pour un référent : simple pastille non cliquable.
       html = `<span class="${MENTION_CLASS}" contenteditable="false" data-mention-kind="referent" data-mention-id="${item.id}">@${escapeHtml(item.label)}</span>`;
     } else if (item.kind === "eleve") {
       html = `<a href="/eleves/${item.id}" target="_blank" rel="noopener noreferrer" class="${MENTION_CLASS}" contenteditable="false" data-mention-kind="eleve" data-mention-id="${item.id}">@${escapeHtml(item.label)}</a>`;
@@ -352,8 +329,6 @@ export function EditeurRiche({
     }
   }
 
-  // Repère le lien survolé (mention @élève, référence #situation/#réunion, ou
-  // tout autre lien) et positionne le petit bouton "✏️" juste au-dessus.
   function annulerFermetureHover() {
     if (timerSurvolRef.current) { clearTimeout(timerSurvolRef.current); timerSurvolRef.current = null; }
   }
@@ -366,9 +341,6 @@ export function EditeurRiche({
   function handleMouseOverEditeur(e: React.MouseEvent<HTMLDivElement>) {
     const cible = (e.target as HTMLElement).closest("a");
     if (!cible || !ref.current?.contains(cible)) return;
-    // Uniquement les liens http(s) bruts (URL tapées/collées) — jamais les
-    // mentions/références internes, qui pointent vers des chemins relatifs
-    // comme "/eleves/..." ou "/situations/...".
     const href = cible.getAttribute("href") ?? "";
     if (!/^https?:\/\//i.test(href)) return;
     annulerFermetureHover();
@@ -383,25 +355,49 @@ export function EditeurRiche({
   function ouvrirEditionLien() {
     if (!lienSurvole) return;
     annulerFermetureHover();
-    const texteActuel = (lienSurvole.el.textContent ?? "").replace(/^[@#]/, "");
-    setLienEnEdition({ el: lienSurvole.el, valeur: texteActuel, top: lienSurvole.top, left: lienSurvole.left });
+    const texteActuel = lienSurvole.el.textContent ?? "";
+    const urlActuelle = lienSurvole.el.getAttribute("href") ?? "";
+    setLienEnEdition({ el: lienSurvole.el, valeur: texteActuel, url: urlActuelle, top: lienSurvole.top, left: lienSurvole.left });
     setLienSurvole(null);
   }
 
   function validerEditionLien() {
     if (!lienEnEdition) return;
     const texte = lienEnEdition.valeur.trim();
-    if (texte) {
-      lienEnEdition.el.textContent = texte;
-      onChange(ref.current?.innerHTML ?? "");
-    }
+    const url   = lienEnEdition.url.trim();
+    if (texte) lienEnEdition.el.textContent = texte;
+    if (url)   lienEnEdition.el.setAttribute("href", url);
+    onChange(ref.current?.innerHTML ?? "");
     setLienEnEdition(null);
   }
 
-  // Ferme le popup uniquement si le clic a lieu VRAIMENT en dehors de celui-ci.
-  // (Avant ce correctif, tout mousedown fermait le popup avant même que le
-  // clic sur un résultat n'ait le temps d'être traité, empêchant toute
-  // sélection — c'est le bug remonté : "je clique mais rien ne se complète".)
+  function ouvrirCreationLien() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !ref.current?.contains(sel.anchorNode)) return;
+    const range = sel.getRangeAt(0).cloneRange();
+    rangeLienRef.current = range;
+    const rect = range.getBoundingClientRect();
+    setCreationLien({ top: rect.bottom + 6, left: rect.left, texte: sel.toString(), url: "" });
+  }
+
+  function validerCreationLien() {
+    if (!creationLien || !rangeLienRef.current) return;
+    const url = creationLien.url.trim();
+    if (!url) return;
+    const texte = creationLien.texte.trim() || url;
+
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(rangeLienRef.current);
+
+    ref.current?.focus();
+    const html = `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="${URL_LINK_CLASS}">${escapeHtml(texte)}</a>`;
+    document.execCommand("insertHTML", false, html);
+    onChange(ref.current?.innerHTML ?? "");
+    setCreationLien(null);
+    rangeLienRef.current = null;
+  }
+
   useEffect(() => {
     if (!popup) return;
     function handleClickOutside(e: MouseEvent) {
@@ -415,7 +411,6 @@ export function EditeurRiche({
   return (
     <div className="relative rounded-xl border border-[#E7E6EF] bg-white overflow-hidden
                      focus-within:border-[#7C6BD6] focus-within:ring-4 focus-within:ring-[#7C6BD6]/15 transition">
-      {/* Barre d'outils */}
       <div className="flex flex-wrap items-center gap-1 border-b border-[#EEEDF5] bg-[#F8F7FC] px-2 py-1.5">
         <select
           onChange={(e) => { if (e.target.value) exec("formatBlock", e.target.value); e.target.value = ""; }}
@@ -446,6 +441,10 @@ export function EditeurRiche({
 
         <span className="mx-1 h-5 w-px bg-[#E7E6EF]" />
 
+        <button type="button" onClick={ouvrirCreationLien} className={barreBoutonCls} title="Transformer la sélection en lien">🔗 Lien</button>
+
+        <span className="mx-1 h-5 w-px bg-[#E7E6EF]" />
+
         <div className="flex items-center gap-1">
           {COULEURS_TEXTE.map((c) => (
             <button key={c.valeur} type="button" onClick={() => exec("foreColor", c.valeur)}
@@ -459,13 +458,11 @@ export function EditeurRiche({
           className={`${barreBoutonCls} ml-auto`} title="Effacer la mise en forme">✕ Effacer</button>
       </div>
 
-      {/* Astuce discrète */}
       <p className="px-4 pt-2 text-[11px] text-[#B4B1C4]">
         Astuce : tapez <span className="font-mono">@</span> pour mentionner un référent/élève,
         {" "}<span className="font-mono">#</span> pour lier une situation/réunion.
       </p>
 
-      {/* Zone éditable */}
       <div
         ref={ref}
         contentEditable
@@ -488,7 +485,6 @@ export function EditeurRiche({
                    [&_img]:block [&_img]:rounded-lg`}
       />
 
-      {/* Bouton flottant : survol d'un lien */}
       {lienSurvole && !lienEnEdition && (
         <button
           type="button"
@@ -503,28 +499,44 @@ export function EditeurRiche({
         </button>
       )}
 
-      {/* Popup de saisie du texte de remplacement */}
       {lienEnEdition && (
         <div
           className="fixed z-[9999] w-64 rounded-xl border border-[#E7E6EF] bg-white p-3 shadow-xl space-y-2"
           style={{ top: lienEnEdition.top, left: lienEnEdition.left }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <p className="text-xs font-medium text-[#3A3556]">Texte affiché pour ce lien</p>
-          <input
-            type="text"
-            autoFocus
-            value={lienEnEdition.valeur}
-            onChange={(e) => setLienEnEdition((p) => (p ? { ...p, valeur: e.target.value } : p))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); validerEditionLien(); }
-              if (e.key === "Escape") setLienEnEdition(null);
-            }}
-            placeholder="Ex. : Cliquer ici"
-            className="w-full rounded-lg border border-[#E7E6EF] bg-white px-2.5 py-1.5 text-sm text-[#1B1633]
-                       outline-none focus:border-[#7C6BD6] focus:ring-2 focus:ring-[#7C6BD6]/15"
-          />
-          <div className="flex gap-2">
+          <div>
+            <p className="text-xs font-medium text-[#3A3556] mb-1">Texte affiché</p>
+            <input
+              type="text"
+              autoFocus
+              value={lienEnEdition.valeur}
+              onChange={(e) => setLienEnEdition((p) => (p ? { ...p, valeur: e.target.value } : p))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); validerEditionLien(); }
+                if (e.key === "Escape") setLienEnEdition(null);
+              }}
+              placeholder="Ex. : Cliquer ici"
+              className="w-full rounded-lg border border-[#E7E6EF] bg-white px-2.5 py-1.5 text-sm text-[#1B1633]
+                         outline-none focus:border-[#7C6BD6] focus:ring-2 focus:ring-[#7C6BD6]/15"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-[#3A3556] mb-1">Adresse (URL)</p>
+            <input
+              type="url"
+              value={lienEnEdition.url}
+              onChange={(e) => setLienEnEdition((p) => (p ? { ...p, url: e.target.value } : p))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); validerEditionLien(); }
+                if (e.key === "Escape") setLienEnEdition(null);
+              }}
+              placeholder="https://…"
+              className="w-full rounded-lg border border-[#E7E6EF] bg-white px-2.5 py-1.5 text-sm text-[#1B1633]
+                         outline-none focus:border-[#7C6BD6] focus:ring-2 focus:ring-[#7C6BD6]/15"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
             <button type="button" onClick={() => setLienEnEdition(null)}
               className="flex-1 rounded-lg border border-[#E7E6EF] px-2 py-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition">
               Annuler
@@ -537,14 +549,59 @@ export function EditeurRiche({
         </div>
       )}
 
-      {/* Popup d'autocomplétion */}
+      {creationLien && (
+        <div
+          className="fixed z-[9999] w-64 rounded-xl border border-[#E7E6EF] bg-white p-3 shadow-xl space-y-2"
+          style={{ top: creationLien.top, left: creationLien.left }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <div>
+            <p className="text-xs font-medium text-[#3A3556] mb-1">Texte affiché</p>
+            <input
+              type="text"
+              value={creationLien.texte}
+              onChange={(e) => setCreationLien((p) => (p ? { ...p, texte: e.target.value } : p))}
+              onKeyDown={(e) => { if (e.key === "Escape") setCreationLien(null); }}
+              className="w-full rounded-lg border border-[#E7E6EF] bg-white px-2.5 py-1.5 text-sm text-[#1B1633]
+                         outline-none focus:border-[#7C6BD6] focus:ring-2 focus:ring-[#7C6BD6]/15"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-[#3A3556] mb-1">Adresse (URL)</p>
+            <input
+              type="url"
+              autoFocus
+              value={creationLien.url}
+              onChange={(e) => setCreationLien((p) => (p ? { ...p, url: e.target.value } : p))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); validerCreationLien(); }
+                if (e.key === "Escape") setCreationLien(null);
+              }}
+              placeholder="https://…"
+              className="w-full rounded-lg border border-[#E7E6EF] bg-white px-2.5 py-1.5 text-sm text-[#1B1633]
+                         outline-none focus:border-[#7C6BD6] focus:ring-2 focus:ring-[#7C6BD6]/15"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={() => setCreationLien(null)}
+              className="flex-1 rounded-lg border border-[#E7E6EF] px-2 py-1.5 text-xs text-[#3A3556] hover:bg-[#F3F2FA] transition">
+              Annuler
+            </button>
+            <button type="button" onClick={validerCreationLien} disabled={!creationLien.url.trim()}
+              className="flex-1 rounded-lg bg-[#1A1440] px-2 py-1.5 text-xs text-white hover:bg-[#2A1E5C] transition disabled:opacity-40">
+              Valider
+            </button>
+          </div>
+        </div>
+      )}
+
       {popup && (
         <div
           ref={popupRef}
           className="fixed z-[9999] w-64 max-h-56 overflow-y-auto rounded-xl border border-[#E7E6EF]
                      bg-white shadow-xl"
           style={{ top: popup.top, left: popup.left }}
-          onMouseDown={(e) => e.preventDefault()} // évite que le clic ne fasse perdre le focus/la sélection dans l'éditeur
+          onMouseDown={(e) => e.preventDefault()}
         >
           {popup.chargement ? (
             <p className="px-3 py-2.5 text-xs text-[#9A97AD]">Recherche…</p>
@@ -572,12 +629,6 @@ export function EditeurRiche({
   );
 }
 
-/* ============================================================
-   Affichage en lecture seule d'un contenu déjà enregistré.
-   Gère la rétrocompatibilité avec les anciens CR (texte brut,
-   sans aucune balise HTML) en convertissant leurs retours à la
-   ligne en <br> pour un rendu correct.
-   ============================================================ */
 export function ContenuRiche({ html, className = "" }: { html: string; className?: string }) {
   const contientDuHtml = /<[a-z][\s\S]*>/i.test(html);
   const contenuAffiche = contientDuHtml ? html : html.replace(/\n/g, "<br/>");
