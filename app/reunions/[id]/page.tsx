@@ -195,7 +195,7 @@ function PanneauCR({
               ✏️ Rédiger le compte rendu
             </button>
           ) : (
-            <p className="text-xs text-[#B4B1C4] italic">Seuls les participants de cette réunion peuvent rédiger ce compte rendu.</p>
+            <p className="text-xs text-[#B4B1C4] italic">Seul le référent en charge de cette réunion peut rédiger ce compte rendu.</p>
           )}
         </div>
       )}
@@ -299,8 +299,7 @@ export default function ReunionDetailPage() {
 
   const canWrite =
     isAdmin ||
-    reunion.referent_charge_id === profile.id ||
-    (reunion.participants ?? []).some((p) => p.id === profile.id);
+    reunion.referent_charge_id === profile.id;
 
   async function handleSave() {
     if (estVide(contenu) || !profile || !reunion) return;
