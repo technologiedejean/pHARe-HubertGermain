@@ -84,6 +84,16 @@ function normaliserGenre(raw: string): Genre | null {
   return null;
 }
 
+// Clé de rapprochement nom+prénom, insensible aux accents et à la casse —
+// sert à détecter qu'une ligne du CSV correspond potentiellement à un élève
+// déjà connu (même nom+prénom), qu'il faudra distinguer entre "homonyme"
+// (deux élèves différents) et "changement de classe" (même élève) si la
+// classe diffère.
+function cleNomPrenom(nom: string, prenom: string): string {
+  const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  return `${norm(nom)}|${norm(prenom)}`;
+}
+
 /* ============================================================
    Icônes
    ============================================================ */
@@ -271,6 +281,71 @@ function ModalEdition({ eleve, onClose, onSuccess }: {
 }
 
 /* ============================================================
+   Modale — Résolution homonyme / changement de classe
+   Affichée pendant l'import CSV quand une ligne correspond à un nom+prénom
+   déjà connu, mais avec une classe différente. Deux étapes :
+   1. Homonyme (deux élèves distincts) ou changement de classe (même élève) ?
+   2. Si changement de classe : laquelle des deux classes garder ?
+   ============================================================ */
+function ModalConflitHomonyme({ nouveau, existant, onResolve }: {
+  nouveau: { nom: string; prenom: string; classe: string };
+  existant: Eleve;
+  onResolve: (decision: "homonyme" | "classe_nouvelle" | "classe_existante") => void;
+}) {
+  const [etape, setEtape] = useState<"type" | "classe">("type");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl p-6 space-y-4">
+        {etape === "type" ? (
+          <>
+            <h2 className="text-base font-semibold text-[#1B1633]">Homonymes ou changement de classe ?</h2>
+            <p className="text-sm text-[#3A3556] leading-relaxed">
+              <strong>{nouveau.prenom} {nouveau.nom}</strong> existe déjà en classe <strong>{existant.classe}</strong>,
+              et le fichier importé indique la classe <strong>{nouveau.classe}</strong> pour un élève du même nom.
+            </p>
+            <p className="text-sm text-[#6C6A80]">
+              {existant.prenom} {existant.nom} ({existant.classe}) et {nouveau.prenom} {nouveau.nom} ({nouveau.classe})
+              sont-ils deux élèves différents, ou s'agit-il de la même personne ayant changé de classe&nbsp;?
+            </p>
+            <div className="flex flex-col gap-2 pt-2">
+              <button onClick={() => onResolve("homonyme")}
+                className="rounded-xl border border-[#E7E6EF] px-4 py-2.5 text-sm font-medium text-[#3A3556] hover:bg-[#F3F2FA] transition text-left">
+                Ce sont deux élèves différents (homonymes) — garder les deux
+              </button>
+              <button onClick={() => setEtape("classe")}
+                className="rounded-xl bg-[#1A1440] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2A1E5C] transition text-left">
+                C'est un changement de classe
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2 className="text-base font-semibold text-[#1B1633]">Quelle classe conserver ?</h2>
+            <p className="text-sm text-[#6C6A80] leading-relaxed">
+              {nouveau.prenom} {nouveau.nom} passe de <strong>{existant.classe}</strong> à <strong>{nouveau.classe}</strong> —
+              laquelle des deux classes doit être conservée pour cet élève&nbsp;?
+            </p>
+            <div className="flex flex-col gap-2 pt-2">
+              <button onClick={() => onResolve("classe_nouvelle")}
+                className="rounded-xl bg-[#1A1440] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2A1E5C] transition text-left">
+                Garder {nouveau.classe} (nouvelle classe du fichier importé)
+              </button>
+              <button onClick={() => onResolve("classe_existante")}
+                className="rounded-xl border border-[#E7E6EF] px-4 py-2.5 text-sm font-medium text-[#3A3556] hover:bg-[#F3F2FA] transition text-left">
+                Garder {existant.classe} (classe actuelle, inchangée)
+              </button>
+              <button onClick={() => setEtape("type")}
+                className="mt-1 text-xs text-[#9A97AD] hover:underline self-start">← Ce sont en fait des homonymes</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    Page principale
    ============================================================ */
 export default function ElevesPage() {
@@ -284,6 +359,11 @@ export default function ElevesPage() {
   const [filterSit, setFilterSit]       = useState<"tous" | "avec" | "sans">("tous");
   const [modalAjout, setModalAjout]     = useState(false);
   const [elevesEnEdition, setElevesEnEdition] = useState<Eleve | null>(null);
+  const [conflit, setConflit] = useState<{
+    nouveau: { nom: string; prenom: string; classe: string };
+    existant: Eleve;
+    resolve: (decision: "homonyme" | "classe_nouvelle" | "classe_existante") => void;
+  } | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importMsg, setImportMsg]       = useState<string | null>(null);
   const [importOk, setImportOk]         = useState(true);
@@ -321,27 +401,59 @@ export default function ElevesPage() {
     init();
   }, [router, loadEleves]);
 
+  // Affiche la modale de résolution et suspend l'import jusqu'à la réponse
+  // de l'utilisateur — indispensable puisqu'on ne peut pas deviner tout seul
+  // s'il s'agit d'un homonyme ou d'un changement de classe.
+  function demanderResolutionConflit(
+    nouveau: { nom: string; prenom: string; classe: string },
+    existant: Eleve
+  ): Promise<"homonyme" | "classe_nouvelle" | "classe_existante"> {
+    return new Promise((resolve) => {
+      setConflit({ nouveau, existant, resolve: (d) => { setConflit(null); resolve(d); } });
+    });
+  }
+
   /* ── Import CSV ──
      Deux points d'attention historiques ici :
      1. .upsert(..., { onConflict: "nom,prenom,classe" }) exige une contrainte
         UNIQUE sur ces 3 colonnes côté base. Si elle n'existe pas, Postgres
         rejette CHAQUE ligne avec la même erreur ("no unique or exclusion
-        constraint matching the ON CONFLICT specification") — d'où un échec
-        display "3 sur 3" qui n'a rien à voir avec le contenu du fichier.
+        constraint matching the ON CONFLICT specification").
         → Exécuter une fois dans Supabase :
           ALTER TABLE public.eleves
           ADD CONSTRAINT eleves_nom_prenom_classe_key UNIQUE (nom, prenom, classe);
      2. La colonne "genre" est NOT NULL en base : il ne faut jamais lui
         envoyer null. Si la valeur du CSV ne peut pas être reconnue, on omet
         simplement la clé pour laisser la valeur par défaut de la base
-        s'appliquer, au lieu de forcer null. */
+        s'appliquer, au lieu de forcer null.
+
+     Traitement des homonymes / changements de classe :
+     Les lignes sont traitées une par une (pas en parallèle) car dès qu'un
+     nom+prénom déjà connu apparaît avec une classe différente, on doit
+     suspendre l'import et demander à l'utilisateur s'il s'agit de deux
+     élèves distincts (homonymes → on garde les deux) ou du même élève ayant
+     changé de classe (→ on demande alors quelle classe conserver, et on met
+     à jour l'élève existant au lieu d'en créer un doublon). */
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setImportLoading(true); setImportMsg(null);
-    const text    = await file.text();
-    const rows    = parseCSV(text);
-    let imported  = 0; let ignores = 0;
+    const text = await file.text();
+    const rows = parseCSV(text);
+
+    // Registre local nom+prénom → élèves déjà connus (base + ajouts de cet
+    // import), pour repérer les conflits au fil de l'eau sans re-requêter.
+    const registre = new Map<string, Eleve[]>();
+    for (const ex of eleves) {
+      const cle = cleNomPrenom(ex.nom, ex.prenom);
+      registre.set(cle, [...(registre.get(cle) ?? []), ex]);
+    }
+
+    let imported     = 0; // nouveaux élèves créés
+    let misAJour      = 0; // classe mise à jour sur un élève existant
+    let dejaPresents  = 0; // ligne strictement identique à un élève existant
+    let conserves     = 0; // conflit résolu en gardant l'existant tel quel
+    let ignores       = 0; // champs manquants ou erreur base
     let premiereErreur: string | null = null;
 
     for (const row of rows) {
@@ -351,27 +463,54 @@ export default function ElevesPage() {
       const genre  = normaliserGenre(row["genre"] ?? row["gender"] ?? "");
       if (!nom || !prenom || !classe) { ignores++; continue; }
 
-      const payload: Record<string, string> = { nom, prenom, classe };
-      if (genre) payload.genre = genre; // sinon on laisse le défaut de la base s'appliquer
+      const cle = cleNomPrenom(nom, prenom);
+      const existants  = registre.get(cle) ?? [];
+      const memeClasse = existants.find((ex) => ex.classe.toUpperCase().trim() === classe);
 
-      const { error } = await supabase.from("eleves").upsert(payload, {
-        onConflict: "nom,prenom,classe", ignoreDuplicates: true,
-      });
+      if (memeClasse) { dejaPresents++; continue; }
+
+      if (existants.length > 0) {
+        const existant = existants[0];
+        const decision = await demanderResolutionConflit({ nom, prenom, classe }, existant);
+
+        if (decision === "classe_existante") { conserves++; continue; }
+
+        if (decision === "classe_nouvelle") {
+          const { error } = await supabase.from("eleves").update({ classe }).eq("id", existant.id);
+          if (error) { ignores++; if (!premiereErreur) premiereErreur = error.message; continue; }
+          existant.classe = classe;
+          misAJour++;
+          continue;
+        }
+        // decision === "homonyme" → on tombe dans l'insertion normale ci-dessous
+      }
+
+      const payload: Record<string, string> = { nom, prenom, classe };
+      if (genre) payload.genre = genre;
+      const { data: cree, error } = await supabase.from("eleves")
+        .insert(payload).select("id, nom, prenom, classe, genre").single();
+
       if (error) {
         ignores++;
         if (!premiereErreur) premiereErreur = error.message;
         console.error("Import CSV — échec d'une ligne :", nom, prenom, classe, error);
-      } else {
-        imported++;
+        continue;
       }
+
+      imported++;
+      registre.set(cle, [...(registre.get(cle) ?? []), { ...(cree as any), situations: [] }]);
     }
 
     setImportLoading(false);
-    setImportOk(imported > 0);
-    setImportMsg(
-      `${imported} élève(s) importé(s)${ignores > 0 ? `, ${ignores} ignoré(s)` : ""}.` +
-      (premiereErreur ? ` Détail de l'erreur : ${premiereErreur}` : "")
-    );
+    setImportOk(imported > 0 || misAJour > 0 || (ignores === 0 && dejaPresents + conserves === rows.length));
+    const parts = [
+      `${imported} élève(s) importé(s)`,
+      misAJour     > 0 ? `${misAJour} classe(s) mise(s) à jour`      : null,
+      dejaPresents > 0 ? `${dejaPresents} déjà présent(s)`           : null,
+      conserves    > 0 ? `${conserves} conservé(s) sans changement`  : null,
+      ignores      > 0 ? `${ignores} ignoré(s)`                      : null,
+    ].filter(Boolean);
+    setImportMsg(parts.join(", ") + "." + (premiereErreur ? ` Détail de l'erreur : ${premiereErreur}` : ""));
     await loadEleves();
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -447,6 +586,9 @@ export default function ElevesPage() {
       {modalAjout && <ModalAjout onClose={() => setModalAjout(false)} onSuccess={loadEleves} />}
       {elevesEnEdition && (
         <ModalEdition eleve={elevesEnEdition} onClose={() => setElevesEnEdition(null)} onSuccess={loadEleves} />
+      )}
+      {conflit && (
+        <ModalConflitHomonyme nouveau={conflit.nouveau} existant={conflit.existant} onResolve={conflit.resolve} />
       )}
 
       {/* 📱 MOBILE */}
