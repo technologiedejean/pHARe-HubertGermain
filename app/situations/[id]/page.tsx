@@ -33,6 +33,8 @@ type CompteRendu = {
   date_entretien: string | null; archive: boolean;
   created_at: string; updated_at: string; auteur_id: string;
   auteur?: { id: string; nom: string; prenom: string; couleur: string };
+  modifie_par?: string | null;
+  modificateur?: { id: string; nom: string; prenom: string; couleur: string } | null;
   lu?: boolean;
 };
 
@@ -529,6 +531,12 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh, peut
 
    La rédaction du CR utilise désormais l'éditeur riche (titres,
    gras, souligné, alignement, couleur, @mentions et #références).
+
+   L'horodatage "Dernière modification" et son auteur sont mis à jour
+   explicitement par l'application à chaque enregistrement (updated_at
+   + modifie_par), plutôt que de dépendre d'un éventuel trigger côté
+   base — ce qui garantit que CHAQUE modification est bien tracée,
+   pas seulement la première.
    ============================================================ */
 function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh, onLectureCR, peutCompleter, peutModifier }: {
   creneau: CreneauAgenda; situationId: string;
@@ -611,7 +619,15 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
     if (estVide(contenu) || !canEdit) return;
     setSaving(true);
     if (hasCR && creneau.cr) {
-      await supabase.from("comptes_rendus").update({ contenu }).eq("id", creneau.cr.id);
+      // Identité récupérée en direct au moment de l'enregistrement (pas
+      // capturée à l'ouverture du formulaire) pour éviter tout décalage
+      // si la session a changé entre-temps.
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from("comptes_rendus").update({
+        contenu,
+        updated_at: new Date().toISOString(),
+        modifie_par: user?.id ?? profile.id,
+      }).eq("id", creneau.cr.id);
     } else {
       await supabase.from("comptes_rendus").insert({
         situation_id: situationId, creneau_id: creneau.id,
@@ -704,7 +720,12 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
                     <p className="text-xs font-semibold text-[#1B1633]">{creneau.cr!.auteur?.prenom} {creneau.cr!.auteur?.nom}</p>
                     <p className="text-xs text-[#9A97AD]">
                       Rédigé le {formatDateHeure(creneau.cr!.created_at)}
-                      {creneau.cr!.updated_at !== creneau.cr!.created_at && ` · Modifié le ${formatDateHeure(creneau.cr!.updated_at)}`}
+                      {creneau.cr!.updated_at !== creneau.cr!.created_at && (
+                        <>
+                          {" · "}Dernière modification le {formatDateHeure(creneau.cr!.updated_at)}
+                          {creneau.cr!.modificateur && ` par ${creneau.cr!.modificateur.prenom} ${creneau.cr!.modificateur.nom}`}
+                        </>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -772,8 +793,9 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, onLectureC
 
     const { data: crsData } = await supabase
       .from("comptes_rendus")
-      .select(`id, contenu, creneau_id, date_entretien, archive, created_at, updated_at, auteur_id,
-               auteur:profiles!comptes_rendus_auteur_id_fkey(id, nom, prenom, couleur)`)
+      .select(`id, contenu, creneau_id, date_entretien, archive, created_at, updated_at, auteur_id, modifie_par,
+               auteur:profiles!comptes_rendus_auteur_id_fkey(id, nom, prenom, couleur),
+               modificateur:profiles!comptes_rendus_modifie_par_fkey(id, nom, prenom, couleur)`)
       .eq("situation_id", situationId)
       .not("contenu", "like", "[NOTE]%");
 
