@@ -550,6 +550,9 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
   const couleurRef = refRef?.couleur ?? "#9A97AD";
   const hasCR      = !!creneau.cr;
   const nonLu      = hasCR && !luLocal;
+  // Un référent en Complétion ne peut rédiger que le CR des entretiens dont il
+  // est lui-même le référent assigné (planifié ou pris en charge). La
+  // Modification (et l'admin) donne accès à tous les CR de la situation.
   const canEdit    = peutModifier || (peutCompleter && (creneau.referent_id === profile.id || creneau.referent_charge_id === profile.id));
   const infosEleve = buildInfosEleve(creneau, acteurs);
   const dateStr    = formatDateLong(creneau.date_creneau);
@@ -940,7 +943,9 @@ function OngletEntretiens({ situationId, acteurs, profile, onRefresh, onLectureC
 }
 
 /* ============================================================
-   ONGLET NOTES (non concerné par l'éditeur riche — reste en texte brut)
+   ONGLET TCHAT (anciennement "Notes")
+   Reste en texte brut — pas concerné par l'éditeur riche.
+   Accessible en écriture dès le niveau Complétion.
    ============================================================ */
 function OngletNotes({ situationId, profile, peutCompleter }: {
   situationId: string; profile: Profile; peutCompleter: boolean;
@@ -979,16 +984,16 @@ function OngletNotes({ situationId, profile, peutCompleter }: {
     <div className="space-y-4">
       {peutCompleter && (
         <div className="rounded-2xl border border-[#EEEDF5] bg-white p-5 space-y-3">
-          <p className="text-sm font-semibold text-[#1B1633]">Ajouter une note</p>
+          <p className="text-sm font-semibold text-[#1B1633]">Envoyer un message</p>
           <textarea value={contenu} onChange={(e) => setContenu(e.target.value)} rows={4}
-            placeholder="Saisissez votre note, observation, information utile…" className={inputCls + " resize-none"} />
+            placeholder="Écrivez votre message, observation, information utile…" className={inputCls + " resize-none"} />
           <button onClick={handleCreate} disabled={creating || !contenu.trim()}
             className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
-            {creating ? "Enregistrement…" : "Ajouter la note"}
+            {creating ? "Envoi…" : "Envoyer"}
           </button>
         </div>
       )}
-      {notes.length === 0 ? <p className="py-8 text-center text-sm text-[#9A97AD]">Aucune note pour cette situation.</p> : (
+      {notes.length === 0 ? <p className="py-8 text-center text-sm text-[#9A97AD]">Aucun message pour cette situation.</p> : (
         <div className="relative">
           <div className="absolute left-[17px] top-0 bottom-0 w-0.5 bg-[#EEEDF5]" />
           <div className="space-y-3 pl-10">
@@ -1297,9 +1302,11 @@ function ModalFusion({ categorie, items, onClose, onSuccess }: {
 
 /* ============================================================
    ONGLET QUALIFICATIONS — Colonne catégorie
+   La qualification (cocher/décocher, ajouter un élément) est
+   désormais réservée au niveau Modification.
    ============================================================ */
-function ColonneCategorie({ categorie, situationId, profile, peutCompleter }: {
-  categorie: CatKey; situationId: string; profile: Profile; peutCompleter: boolean;
+function ColonneCategorie({ categorie, situationId, profile, peutModifier }: {
+  categorie: CatKey; situationId: string; profile: Profile; peutModifier: boolean;
 }) {
   const cfg = CAT_CONFIG[categorie];
   const [items, setItems]       = useState<RefItem[]>([]);
@@ -1322,7 +1329,7 @@ function ColonneCategorie({ categorie, situationId, profile, peutCompleter }: {
   useEffect(() => { load(); }, [load]);
 
   async function handleToggle(itemId: string) {
-    if (!peutCompleter) return;
+    if (!peutModifier) return;
     setSaving(itemId);
     if (cochees.has(itemId)) {
       await supabase.from(cfg.liaisonTable).delete().eq("situation_id", situationId).eq(cfg.liaisonCol, itemId);
@@ -1369,10 +1376,10 @@ function ColonneCategorie({ categorie, situationId, profile, peutCompleter }: {
             return (
               <label key={item.id}
                 className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition
-                           ${peutCompleter ? "cursor-pointer" : "cursor-default"}
-                           ${estCoche ? "bg-[#F5F3FF]" : peutCompleter ? "hover:bg-[#F8F7FC]" : ""}`}>
-                <CheckBox checked={estCoche} onChange={() => handleToggle(item.id)} loading={enCours} disabled={!peutCompleter} />
-                <input type="checkbox" className="sr-only" checked={estCoche} onChange={() => !enCours && handleToggle(item.id)} disabled={!peutCompleter} />
+                           ${peutModifier ? "cursor-pointer" : "cursor-default"}
+                           ${estCoche ? "bg-[#F5F3FF]" : peutModifier ? "hover:bg-[#F8F7FC]" : ""}`}>
+                <CheckBox checked={estCoche} onChange={() => handleToggle(item.id)} loading={enCours} disabled={!peutModifier} />
+                <input type="checkbox" className="sr-only" checked={estCoche} onChange={() => !enCours && handleToggle(item.id)} disabled={!peutModifier} />
                 <span className={`text-sm transition ${estCoche ? "font-medium text-[#1B1633]" : "text-[#3A3556]"}`}>{item.label}</span>
               </label>
             );
@@ -1380,7 +1387,7 @@ function ColonneCategorie({ categorie, situationId, profile, peutCompleter }: {
         </div>
 
         {/* Bouton + */}
-        {peutCompleter && (
+        {peutModifier && (
           <div className="border-t border-[#F3F2FA] px-4 py-3">
             <button onClick={() => setModalAjout(true)}
               className="flex w-full items-center gap-2 rounded-xl border border-dashed border-[#D1CFE2]
@@ -1398,9 +1405,11 @@ function ColonneCategorie({ categorie, situationId, profile, peutCompleter }: {
 
 /* ============================================================
    ONGLET QUALIFICATIONS
+   Réservé au niveau Modification (admin, créateur, ou référent
+   avec droit "modification" sur la situation).
    ============================================================ */
-function OngletQualifications({ situationId, profile, peutCompleter }: {
-  situationId: string; profile: Profile; peutCompleter: boolean;
+function OngletQualifications({ situationId, profile, peutModifier }: {
+  situationId: string; profile: Profile; peutModifier: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -1408,17 +1417,20 @@ function OngletQualifications({ situationId, profile, peutCompleter }: {
         Qualifiez la situation en cochant les éléments pertinents dans chaque catégorie.
         Ces informations alimenteront les statistiques de fin d'année.
       </p>
+      {!peutModifier && (
+        <p className="text-xs text-[#9A97AD]">🔒 Seul un droit de Modification permet de qualifier cette situation.</p>
+      )}
       {/* 💻 PC — 3 colonnes */}
       <div className="hidden lg:grid grid-cols-3 gap-4">
-        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
-        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
-        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
+        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} peutModifier={peutModifier} />
+        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} peutModifier={peutModifier} />
+        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} peutModifier={peutModifier} />
       </div>
       {/* 📱 Mobile — 3 blocs empilés */}
       <div className="lg:hidden space-y-4">
-        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
-        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
-        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} peutCompleter={peutCompleter} />
+        <ColonneCategorie categorie="motifs"         situationId={situationId} profile={profile} peutModifier={peutModifier} />
+        <ColonneCategorie categorie="manifestations" situationId={situationId} profile={profile} peutModifier={peutModifier} />
+        <ColonneCategorie categorie="lieux"          situationId={situationId} profile={profile} peutModifier={peutModifier} />
       </div>
     </div>
   );
@@ -1443,8 +1455,10 @@ export default function FicheSituationPage() {
   // cette situation n'a pas encore été ouvert par l'utilisateur connecté.
   const [entretiensNonLus, setEntretiensNonLus] = useState(false);
 
-  // "modification" couvre le contrôle complet (les admins ont toujours ce niveau).
-  // "completion" (ou plus) permet d'ajouter du contenu (CR, notes, qualifications, acteurs).
+  // "modification" couvre le contrôle complet : gravité, statut, infos générales
+  // et qualification de la situation (les admins et le créateur ont toujours ce niveau).
+  // "completion" (ou plus) permet d'ajouter du contenu (planifier un entretien,
+  // rédiger un CR, écrire dans le tchat, ajouter un protagoniste).
   const peutModifier  = monNiveau === "modification";
   const peutCompleter = monNiveau === "completion" || monNiveau === "modification";
 
@@ -1495,10 +1509,19 @@ export default function FicheSituationPage() {
       setProfile(prof);
 
       // Détermine le niveau d'accès réel de l'utilisateur sur cette situation.
-      // Les admins ont toujours un contrôle complet. Les référents dépendent de
-      // referent_situation_droits ; en l'absence de ligne on reste en lecture seule
-      // par précaution (RLS devrait de toute façon déjà bloquer l'accès sinon).
-      if (prof?.role === "admin") {
+      // Les admins ont toujours un contrôle complet. Le créateur de la situation
+      // a lui aussi toujours un droit de "modification" sur sa propre situation,
+      // même sans ligne explicite dans referent_situation_droits. Les autres
+      // référents dépendent de referent_situation_droits ; en l'absence de ligne
+      // on reste en lecture seule par précaution (RLS devrait de toute façon
+      // déjà bloquer l'accès sinon).
+      const { data: sitCreateur } = await supabase
+        .from("situations")
+        .select("cree_par")
+        .eq("id", situationId)
+        .maybeSingle();
+
+      if (prof?.role === "admin" || sitCreateur?.cree_par === user.id) {
         setMonNiveau("modification");
       } else {
         const { data: droit } = await supabase
@@ -1524,7 +1547,7 @@ export default function FicheSituationPage() {
     { key: "infos",           label: "Infos"          },
     { key: "qualifications",  label: "Qualification"  },
     { key: "entretiens",      label: "Entretiens"     },
-    { key: "notes",           label: "Notes"          },
+    { key: "notes",           label: "Tchat"          },
     { key: "droits",          label: "Droits"         },
   ];
 
@@ -1549,7 +1572,7 @@ export default function FicheSituationPage() {
     if (onglet === "droits")
       return <OngletDroits situationId={situationId} profile={profile} allReferents={referents} />;
     if (onglet === "qualifications")
-      return <OngletQualifications situationId={situationId} profile={profile} peutCompleter={peutCompleter} />;
+      return <OngletQualifications situationId={situationId} profile={profile} peutModifier={peutModifier} />;
     return null;
   };
 
