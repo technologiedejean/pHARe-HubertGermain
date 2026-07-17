@@ -390,7 +390,7 @@ export default function DashboardPage() {
             sublabel="Situations clôturées"
           />
           <StatCard
-            label="Entretiens à venir"
+            label="Evènements à venir"
             value={stats.entretiens_a_venir}
             color="#6656B8"
             href="/agenda"
