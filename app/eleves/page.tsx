@@ -52,6 +52,10 @@ const GENRE_LABELS: Record<Genre, string> = {
   autre:    "Autre",
 };
 
+const inputCls =
+  "mt-1.5 w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm " +
+  "text-[#1B1633] outline-none focus:border-[#7C6BD6] focus:ring-4 focus:ring-[#7C6BD6]/15 transition";
+
 /* ============================================================
    Helpers
    ============================================================ */
@@ -68,16 +72,34 @@ function parseCSV(text: string): Record<string, string>[] {
 }
 
 /* ============================================================
+   Icônes
+   ============================================================ */
+function IconCrayon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </svg>
+  );
+}
+
+function IconCorbeille({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+      <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+    </svg>
+  );
+}
+
+/* ============================================================
    Modale — Ajout manuel
    ============================================================ */
 function ModalAjout({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ nom: "", prenom: "", classe: "", genre: "" as Genre | "" });
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
-
-  const inputCls =
-    "mt-1.5 w-full rounded-xl border border-[#E7E6EF] bg-white px-4 py-2.5 text-sm " +
-    "text-[#1B1633] outline-none focus:border-[#7C6BD6] focus:ring-4 focus:ring-[#7C6BD6]/15 transition";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -152,6 +174,90 @@ function ModalAjout({ onClose, onSuccess }: { onClose: () => void; onSuccess: ()
 }
 
 /* ============================================================
+   Modale — Édition d'une fiche élève existante
+   ============================================================ */
+function ModalEdition({ eleve, onClose, onSuccess }: {
+  eleve: Eleve; onClose: () => void; onSuccess: () => void;
+}) {
+  const [form, setForm] = useState({
+    nom: eleve.nom, prenom: eleve.prenom, classe: eleve.classe, genre: (eleve.genre ?? "") as Genre | "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.nom.trim() || !form.prenom.trim() || !form.classe.trim()) {
+      setError("Nom, prénom et classe sont obligatoires."); return;
+    }
+    setLoading(true); setError(null);
+    const { error: err } = await supabase.from("eleves").update({
+      nom:    form.nom.trim().toUpperCase(),
+      prenom: form.prenom.trim(),
+      classe: form.classe.trim().toUpperCase(),
+      genre:  form.genre || null,
+    }).eq("id", eleve.id);
+    if (err) { setError(err.message); setLoading(false); return; }
+    setLoading(false); onSuccess(); onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[#EEEDF5] px-6 py-4">
+          <h2 className="text-base font-semibold text-[#1B1633]">Modifier la fiche élève</h2>
+          <button onClick={onClose}
+            className="h-8 w-8 rounded-full text-[#9A97AD] hover:bg-[#F3F2FA] transition flex items-center justify-center">✕</button>
+        </div>
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+          {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-[#3A3556]">Nom <span className="text-red-500">*</span></label>
+              <input type="text" placeholder="DUPONT" value={form.nom}
+                onChange={(e) => setForm((f) => ({ ...f, nom: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[#3A3556]">Prénom <span className="text-red-500">*</span></label>
+              <input type="text" placeholder="Marie" value={form.prenom}
+                onChange={(e) => setForm((f) => ({ ...f, prenom: e.target.value }))} className={inputCls} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-[#3A3556]">Classe <span className="text-red-500">*</span></label>
+              <input type="text" placeholder="6A" value={form.classe}
+                onChange={(e) => setForm((f) => ({ ...f, classe: e.target.value }))} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[#3A3556]">Genre</label>
+              <select value={form.genre} onChange={(e) => setForm((f) => ({ ...f, genre: e.target.value as Genre | "" }))}
+                className={inputCls}>
+                <option value="">-- Non précisé --</option>
+                <option value="masculin">Masculin</option>
+                <option value="feminin">Féminin</option>
+                <option value="autre">Autre</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose}
+              className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2.5 text-sm font-medium text-[#3A3556] hover:bg-[#F3F2FA] transition">
+              Annuler
+            </button>
+            <button type="submit" disabled={loading}
+              className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#2A1E5C] transition disabled:opacity-50">
+              {loading ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    Page principale
    ============================================================ */
 export default function ElevesPage() {
@@ -164,6 +270,7 @@ export default function ElevesPage() {
   const [filterGenre, setFilterGenre]   = useState("");
   const [filterSit, setFilterSit]       = useState<"tous" | "avec" | "sans">("tous");
   const [modalAjout, setModalAjout]     = useState(false);
+  const [elevesEnEdition, setElevesEnEdition] = useState<Eleve | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importMsg, setImportMsg]       = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -295,6 +402,9 @@ export default function ElevesPage() {
   return (
     <div className="min-h-screen bg-[#FBFBFD] text-[#1B1633]">
       {modalAjout && <ModalAjout onClose={() => setModalAjout(false)} onSuccess={loadEleves} />}
+      {elevesEnEdition && (
+        <ModalEdition eleve={elevesEnEdition} onClose={() => setElevesEnEdition(null)} onSuccess={loadEleves} />
+      )}
 
       {/* 📱 MOBILE */}
       <div className="lg:hidden flex flex-col min-h-screen">
@@ -326,7 +436,23 @@ export default function ElevesPage() {
                   className="text-sm font-semibold text-[#1B1633] hover:text-[#6656B8] hover:underline text-left">
                   {e.nom} {e.prenom}
                 </button>
-                <span className="shrink-0 rounded-full bg-[#F3F2FA] px-2 py-0.5 text-xs text-[#6C6A80]">{e.classe}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="rounded-full bg-[#F3F2FA] px-2 py-0.5 text-xs text-[#6C6A80]">{e.classe}</span>
+                  {isAdmin && (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setElevesEnEdition(e)}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E7E6EF] bg-white text-[#6C6A80] hover:text-[#6656B8] hover:border-[#7C6BD6] transition"
+                        title="Modifier la fiche">
+                        <IconCrayon />
+                      </button>
+                      <button onClick={() => handleSupprimer(e.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E7E6EF] bg-white text-[#C4C2D4] hover:text-red-500 hover:border-red-200 transition"
+                        title="Supprimer">
+                        <IconCorbeille />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               {e.genre && <p className="text-xs text-[#9A97AD] mt-0.5">{GENRE_LABELS[e.genre]}</p>}
               {e.situations.length > 0 && (
@@ -437,13 +563,18 @@ export default function ElevesPage() {
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-3 text-right">
-                      <button onClick={() => handleSupprimer(e.id)}
-                        className="text-[#C4C2D4] hover:text-red-500 transition">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-                          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                        </svg>
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => setElevesEnEdition(e)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E7E6EF] bg-white text-[#6C6A80] hover:text-[#6656B8] hover:border-[#7C6BD6] transition"
+                          title="Modifier la fiche">
+                          <IconCrayon />
+                        </button>
+                        <button onClick={() => handleSupprimer(e.id)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E7E6EF] bg-white text-[#C4C2D4] hover:text-red-500 hover:border-red-200 transition"
+                          title="Supprimer">
+                          <IconCorbeille />
+                        </button>
+                      </div>
                     </td>
                   )}
                 </tr>
