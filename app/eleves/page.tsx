@@ -71,6 +71,19 @@ function parseCSV(text: string): Record<string, string>[] {
   });
 }
 
+// Normalise une valeur de genre saisie librement dans un CSV ("Féminin",
+// "féminin", "F"…) vers l'une des valeurs acceptées par la colonne "genre"
+// (NOT NULL en base). Les accents sont retirés avant comparaison — sans ça,
+// "Féminin".toLowerCase() === "féminin" ne matche jamais "feminin" et on
+// finit par vouloir écrire null sur une colonne qui l'interdit.
+function normaliserGenre(raw: string): Genre | null {
+  const s = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  if (s === "masculin" || s === "m" || s === "garcon") return "masculin";
+  if (s === "feminin"  || s === "f" || s === "fille")  return "feminin";
+  if (s === "autre")   return "autre";
+  return null;
+}
+
 /* ============================================================
    Icônes
    ============================================================ */
@@ -273,6 +286,7 @@ export default function ElevesPage() {
   const [elevesEnEdition, setElevesEnEdition] = useState<Eleve | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importMsg, setImportMsg]       = useState<string | null>(null);
+  const [importOk, setImportOk]         = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadEleves = useCallback(async () => {
@@ -307,28 +321,57 @@ export default function ElevesPage() {
     init();
   }, [router, loadEleves]);
 
-  /* ── Import CSV ── */
+  /* ── Import CSV ──
+     Deux points d'attention historiques ici :
+     1. .upsert(..., { onConflict: "nom,prenom,classe" }) exige une contrainte
+        UNIQUE sur ces 3 colonnes côté base. Si elle n'existe pas, Postgres
+        rejette CHAQUE ligne avec la même erreur ("no unique or exclusion
+        constraint matching the ON CONFLICT specification") — d'où un échec
+        display "3 sur 3" qui n'a rien à voir avec le contenu du fichier.
+        → Exécuter une fois dans Supabase :
+          ALTER TABLE public.eleves
+          ADD CONSTRAINT eleves_nom_prenom_classe_key UNIQUE (nom, prenom, classe);
+     2. La colonne "genre" est NOT NULL en base : il ne faut jamais lui
+        envoyer null. Si la valeur du CSV ne peut pas être reconnue, on omet
+        simplement la clé pour laisser la valeur par défaut de la base
+        s'appliquer, au lieu de forcer null. */
   async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setImportLoading(true); setImportMsg(null);
     const text    = await file.text();
     const rows    = parseCSV(text);
-    let imported  = 0; let errors = 0;
+    let imported  = 0; let ignores = 0;
+    let premiereErreur: string | null = null;
+
     for (const row of rows) {
       const nom    = (row["nom"]    ?? row["name"] ?? "").toUpperCase().trim();
       const prenom = (row["prenom"] ?? row["firstname"] ?? row["prénom"] ?? "").trim();
       const classe = (row["classe"] ?? row["class"] ?? "").toUpperCase().trim();
-      const genre  = (row["genre"]  ?? row["gender"] ?? "").toLowerCase().trim() as Genre | "";
-      if (!nom || !prenom || !classe) { errors++; continue; }
-      const { error } = await supabase.from("eleves").upsert(
-        { nom, prenom, classe, genre: ["masculin","feminin","autre"].includes(genre) ? genre : null },
-        { onConflict: "nom,prenom,classe", ignoreDuplicates: true }
-      );
-      if (error) errors++; else imported++;
+      const genre  = normaliserGenre(row["genre"] ?? row["gender"] ?? "");
+      if (!nom || !prenom || !classe) { ignores++; continue; }
+
+      const payload: Record<string, string> = { nom, prenom, classe };
+      if (genre) payload.genre = genre; // sinon on laisse le défaut de la base s'appliquer
+
+      const { error } = await supabase.from("eleves").upsert(payload, {
+        onConflict: "nom,prenom,classe", ignoreDuplicates: true,
+      });
+      if (error) {
+        ignores++;
+        if (!premiereErreur) premiereErreur = error.message;
+        console.error("Import CSV — échec d'une ligne :", nom, prenom, classe, error);
+      } else {
+        imported++;
+      }
     }
+
     setImportLoading(false);
-    setImportMsg(`${imported} élève(s) importé(s)${errors > 0 ? `, ${errors} ignoré(s)` : ""}.`);
+    setImportOk(imported > 0);
+    setImportMsg(
+      `${imported} élève(s) importé(s)${ignores > 0 ? `, ${ignores} ignoré(s)` : ""}.` +
+      (premiereErreur ? ` Détail de l'erreur : ${premiereErreur}` : "")
+    );
     await loadEleves();
     if (fileRef.current) fileRef.current.value = "";
   }
@@ -426,7 +469,9 @@ export default function ElevesPage() {
         </header>
         <main className="flex-1 px-5 py-4 space-y-2">
           {importMsg && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{importMsg}</div>
+            <div className={`rounded-xl border px-4 py-3 text-sm ${
+              importOk ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"
+            }`}>{importMsg}</div>
           )}
           <p className="text-xs text-[#9A97AD] mb-2">{filtered.length} élève(s)</p>
           {filtered.map((e) => (
@@ -496,7 +541,9 @@ export default function ElevesPage() {
         </div>
 
         {importMsg && (
-          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{importMsg}</div>
+          <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
+            importOk ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"
+          }`}>{importMsg}</div>
         )}
 
         {/* Filtres */}
