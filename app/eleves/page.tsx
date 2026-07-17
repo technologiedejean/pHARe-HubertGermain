@@ -346,6 +346,24 @@ function ModalConflitHomonyme({ nouveau, existant, onResolve }: {
 }
 
 /* ============================================================
+   Barre de progression affichée pendant un import CSV
+   ============================================================ */
+function BarreProgressionImport({ progress }: { progress: { fait: number; total: number } }) {
+  const pct = progress.total > 0 ? Math.round((progress.fait / progress.total) * 100) : 0;
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+      <p className="text-sm font-medium text-amber-800">
+        ⚠️ Import en cours — ne fermez pas cette page.
+      </p>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-amber-100">
+        <div className="h-full rounded-full bg-amber-500 transition-all duration-200" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="text-xs text-amber-700">{progress.fait} / {progress.total} élève(s) traité(s) ({pct}%)</p>
+    </div>
+  );
+}
+
+/* ============================================================
    Page principale
    ============================================================ */
 export default function ElevesPage() {
@@ -367,6 +385,7 @@ export default function ElevesPage() {
   const [importLoading, setImportLoading] = useState(false);
   const [importMsg, setImportMsg]       = useState<string | null>(null);
   const [importOk, setImportOk]         = useState(true);
+  const [importProgress, setImportProgress] = useState<{ fait: number; total: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadEleves = useCallback(async () => {
@@ -400,6 +419,18 @@ export default function ElevesPage() {
     }
     init();
   }, [router, loadEleves]);
+
+  // Empêche de quitter accidentellement la page pendant un import en cours :
+  // affiche la confirmation native du navigateur ("Quitter le site ?").
+  useEffect(() => {
+    if (!importLoading) return;
+    function handler(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [importLoading]);
 
   // Affiche la modale de résolution et suspend l'import jusqu'à la réponse
   // de l'utilisateur — indispensable puisqu'on ne peut pas deviner tout seul
@@ -440,6 +471,7 @@ export default function ElevesPage() {
     setImportLoading(true); setImportMsg(null);
     const text = await file.text();
     const rows = parseCSV(text);
+    setImportProgress({ fait: 0, total: rows.length });
 
     // Registre local nom+prénom → élèves déjà connus (base + ajouts de cet
     // import), pour repérer les conflits au fil de l'eau sans re-requêter.
@@ -456,51 +488,59 @@ export default function ElevesPage() {
     let ignores       = 0; // champs manquants ou erreur base
     let premiereErreur: string | null = null;
 
-    for (const row of rows) {
-      const nom    = (row["nom"]    ?? row["name"] ?? "").toUpperCase().trim();
-      const prenom = (row["prenom"] ?? row["firstname"] ?? row["prénom"] ?? "").trim();
-      const classe = (row["classe"] ?? row["class"] ?? "").toUpperCase().trim();
-      const genre  = normaliserGenre(row["genre"] ?? row["gender"] ?? "");
-      if (!nom || !prenom || !classe) { ignores++; continue; }
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        const nom    = (row["nom"]    ?? row["name"] ?? "").toUpperCase().trim();
+        const prenom = (row["prenom"] ?? row["firstname"] ?? row["prénom"] ?? "").trim();
+        const classe = (row["classe"] ?? row["class"] ?? "").toUpperCase().trim();
+        const genre  = normaliserGenre(row["genre"] ?? row["gender"] ?? "");
+        if (!nom || !prenom || !classe) { ignores++; continue; }
 
-      const cle = cleNomPrenom(nom, prenom);
-      const existants  = registre.get(cle) ?? [];
-      const memeClasse = existants.find((ex) => ex.classe.toUpperCase().trim() === classe);
+        const cle = cleNomPrenom(nom, prenom);
+        const existants  = registre.get(cle) ?? [];
+        const memeClasse = existants.find((ex) => ex.classe.toUpperCase().trim() === classe);
 
-      if (memeClasse) { dejaPresents++; continue; }
+        if (memeClasse) { dejaPresents++; continue; }
 
-      if (existants.length > 0) {
-        const existant = existants[0];
-        const decision = await demanderResolutionConflit({ nom, prenom, classe }, existant);
+        if (existants.length > 0) {
+          const existant = existants[0];
+          const decision = await demanderResolutionConflit({ nom, prenom, classe }, existant);
 
-        if (decision === "classe_existante") { conserves++; continue; }
+          if (decision === "classe_existante") { conserves++; continue; }
 
-        if (decision === "classe_nouvelle") {
-          const { error } = await supabase.from("eleves").update({ classe }).eq("id", existant.id);
-          if (error) { ignores++; if (!premiereErreur) premiereErreur = error.message; continue; }
-          existant.classe = classe;
-          misAJour++;
+          if (decision === "classe_nouvelle") {
+            const { error } = await supabase.from("eleves").update({ classe }).eq("id", existant.id);
+            if (error) { ignores++; if (!premiereErreur) premiereErreur = error.message; continue; }
+            existant.classe = classe;
+            misAJour++;
+            continue;
+          }
+          // decision === "homonyme" → on tombe dans l'insertion normale ci-dessous
+        }
+
+        const payload: Record<string, string> = { nom, prenom, classe };
+        if (genre) payload.genre = genre;
+        const { data: cree, error } = await supabase.from("eleves")
+          .insert(payload).select("id, nom, prenom, classe, genre").single();
+
+        if (error) {
+          ignores++;
+          if (!premiereErreur) premiereErreur = error.message;
+          console.error("Import CSV — échec d'une ligne :", nom, prenom, classe, error);
           continue;
         }
-        // decision === "homonyme" → on tombe dans l'insertion normale ci-dessous
+
+        imported++;
+        registre.set(cle, [...(registre.get(cle) ?? []), { ...(cree as any), situations: [] }]);
+      } finally {
+        // Toujours exécuté, y compris sur les "continue" ci-dessus : la barre
+        // de progression avance ligne après ligne, quelle que soit l'issue.
+        setImportProgress({ fait: i + 1, total: rows.length });
       }
-
-      const payload: Record<string, string> = { nom, prenom, classe };
-      if (genre) payload.genre = genre;
-      const { data: cree, error } = await supabase.from("eleves")
-        .insert(payload).select("id, nom, prenom, classe, genre").single();
-
-      if (error) {
-        ignores++;
-        if (!premiereErreur) premiereErreur = error.message;
-        console.error("Import CSV — échec d'une ligne :", nom, prenom, classe, error);
-        continue;
-      }
-
-      imported++;
-      registre.set(cle, [...(registre.get(cle) ?? []), { ...(cree as any), situations: [] }]);
     }
 
+    setImportProgress(null);
     setImportLoading(false);
     setImportOk(imported > 0 || misAJour > 0 || (ignores === 0 && dejaPresents + conserves === rows.length));
     const parts = [
@@ -610,6 +650,7 @@ export default function ElevesPage() {
                        placeholder:text-[#B4B1C4] focus:border-[#7C6BD6] focus:ring-2 focus:ring-[#7C6BD6]/15 transition" />
         </header>
         <main className="flex-1 px-5 py-4 space-y-2">
+          {importProgress && <BarreProgressionImport progress={importProgress} />}
           {importMsg && (
             <div className={`rounded-xl border px-4 py-3 text-sm ${
               importOk ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"
@@ -682,6 +723,7 @@ export default function ElevesPage() {
           </div>
         </div>
 
+        {importProgress && <div className="mb-4"><BarreProgressionImport progress={importProgress} /></div>}
         {importMsg && (
           <div className={`mb-4 rounded-xl border px-4 py-3 text-sm ${
             importOk ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"
