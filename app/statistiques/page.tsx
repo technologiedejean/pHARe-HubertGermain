@@ -1,6 +1,4 @@
-// >>> NOUVEAU FICHIER : app/statistiques/page.tsx <<<
-// Créer le dossier : app/statistiques/
-// Créer le fichier : app/statistiques/page.tsx
+// >>> Ce fichier REMPLACE : app/statistiques/page.tsx <<<
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
@@ -17,6 +15,13 @@ type StatItem = { label: string; count: number; couleur?: string };
 type RawQualif = { situation_id: string | null; label: string };
 
 type Demographie = { genres: Set<string>; niveaux: Set<string> };
+
+// Population sur laquelle s'appliquent les filtres Genre/Niveau des graphiques
+// de Qualifications. Choix obligatoire — on ne peut pas mélanger victimes et
+// intimidateurs dans un même filtre, car "quels motifs touchent davantage les
+// filles" n'a pas le même sens selon qu'on parle des filles victimes ou des
+// filles intimidatrices.
+type RoleFiltre = "victime" | "intimidateur";
 
 type Stats = {
   totalSituations:   number;
@@ -56,6 +61,11 @@ const OPTIONS_NIVEAU = [
   { value: "3ème", label: "3ème" },
 ];
 
+const OPTIONS_ROLE_FILTRE: { value: RoleFiltre; label: string; couleur: string }[] = [
+  { value: "victime",       label: "Victimes",      couleur: COULEUR_VICTIMES      },
+  { value: "intimidateur",  label: "Intimidateurs", couleur: COULEUR_INTIMIDATEURS },
+];
+
 /* ============================================================
    Helpers
    ============================================================ */
@@ -84,8 +94,9 @@ function compterParCle<T>(items: T[], fn: (item: T) => string): StatItem[] {
 }
 
 // Une situation est-elle concernée par le filtre "genre" ?
-// Si elle n'a aucun élève masculin/féminin identifié (élève "autre" ou
-// non renseigné uniquement), le filtre ne s'applique pas et elle passe.
+// Si elle n'a aucun élève masculin/féminin identifié, dans le rôle actif,
+// (élève "autre" ou non renseigné uniquement), le filtre ne s'applique pas
+// et elle passe.
 function passeFiltreGenre(demo: Demographie | undefined, selection: Set<string>): boolean {
   if (!demo) return true;
   const pertinents = ["masculin", "feminin"].filter((g) => demo.genres.has(g));
@@ -286,6 +297,45 @@ function BarresComparaison({
 }
 
 /* ============================================================
+   Sélecteur de rôle (Victimes / Intimidateurs) — choix obligatoire
+   pour pouvoir utiliser les filtres Genre/Niveau des graphiques de
+   Qualifications. Un seul rôle actif à la fois : mélanger les deux
+   rendrait le filtre Genre/Niveau ambigu (voir commentaire plus haut).
+   ============================================================ */
+function SelecteurRole({ selection, onChange }: {
+  selection: RoleFiltre; onChange: (r: RoleFiltre) => void;
+}) {
+  return (
+    <div className="mb-4">
+      <p className="text-xs font-semibold uppercase tracking-wider text-[#9A97AD] mb-2">
+        Filtrer sur les
+      </p>
+      <div className="inline-flex rounded-xl border border-[#E7E6EF] bg-[#F8F7FC] p-1">
+        {OPTIONS_ROLE_FILTRE.map((o) => {
+          const actif = selection === o.value;
+          return (
+            <button
+              key={o.value}
+              onClick={() => onChange(o.value)}
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
+                actif ? "text-white shadow-sm" : "text-[#6C6A80] hover:text-[#3A3556]"
+              }`}
+              style={actif ? { backgroundColor: o.couleur } : undefined}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-1.5 text-[11px] text-[#B4B1C4]">
+        Les filtres Genre et Niveau ci-dessous s'appliquent uniquement aux élèves{" "}
+        {selection === "victime" ? "victimes" : "intimidateurs"} de chaque situation.
+      </p>
+    </div>
+  );
+}
+
+/* ============================================================
    Groupe de cases à cocher (filtre) avec bouton Tous / Aucun
    ============================================================ */
 function FiltreCheckboxes({
@@ -379,15 +429,21 @@ export default function StatistiquesPage() {
   const [stats, setStats]       = useState<Stats | null>(null);
   const [loading, setLoading]   = useState(true);
 
-  // Données brutes des qualifications (avec situation_id) + démographie par situation.
-  // Conservées à part car recalculées côté client à chaque changement de filtre,
-  // sans nouvel appel réseau.
+  // Données brutes des qualifications (avec situation_id) + démographie par
+  // situation, calculée séparément pour les victimes et pour les
+  // intimidateurs (deux populations distinctes, jamais mélangées).
+  // Conservées à part car recalculées côté client à chaque changement de
+  // filtre, sans nouvel appel réseau.
   const [rawMotifs, setRawMotifs]   = useState<RawQualif[]>([]);
   const [rawManifs, setRawManifs]   = useState<RawQualif[]>([]);
   const [rawLieux, setRawLieux]     = useState<RawQualif[]>([]);
-  const [demographies, setDemographies] = useState<Map<string, Demographie>>(new Map());
+  const [demographiesVictimes, setDemographiesVictimes]           = useState<Map<string, Demographie>>(new Map());
+  const [demographiesIntimidateurs, setDemographiesIntimidateurs] = useState<Map<string, Demographie>>(new Map());
 
-  // Filtres — tout coché par défaut.
+  // Choix obligatoire de la population de référence pour les filtres
+  // Genre/Niveau. "Victimes" par défaut — avec Genre/Niveau tout cochés,
+  // ça ne change rien au comportement par défaut de l'écran.
+  const [roleFiltre, setRoleFiltre]           = useState<RoleFiltre>("victime");
   const [selectionGenre, setSelectionGenre]   = useState<Set<string>>(new Set(OPTIONS_GENRE.map((o) => o.value)));
   const [selectionNiveau, setSelectionNiveau] = useState<Set<string>>(new Set(OPTIONS_NIVEAU.map((o) => o.value)));
 
@@ -467,18 +523,23 @@ export default function StatistiquesPage() {
       ),
     });
 
-    // ── Démographie par situation (pour les filtres) ───────
-    // Un élève (victime ou intimidateur) "vote" son genre et son niveau
-    // pour toutes les situations où il apparaît.
-    const demoMap = new Map<string, Demographie>();
+    // ── Démographie par situation, séparée par rôle ────────
+    // Un élève "vote" son genre et son niveau pour chaque situation où il
+    // apparaît, mais uniquement dans la carte correspondant à SON rôle —
+    // victime et intimidateur ne sont jamais comptés dans la même carte.
+    const demoVictimes      = new Map<string, Demographie>();
+    const demoIntimidateurs = new Map<string, Demographie>();
     for (const a of acteursData) {
       if (!a.situation_id || !a.eleve) continue;
-      const entry = demoMap.get(a.situation_id) ?? { genres: new Set<string>(), niveaux: new Set<string>() };
+      if (a.role !== "victime" && a.role !== "intimidateur") continue;
+      const cible = a.role === "victime" ? demoVictimes : demoIntimidateurs;
+      const entry = cible.get(a.situation_id) ?? { genres: new Set<string>(), niveaux: new Set<string>() };
       if (a.eleve.genre) entry.genres.add(a.eleve.genre);
       entry.niveaux.add(classeVersNiveau(a.eleve.classe));
-      demoMap.set(a.situation_id, entry);
+      cible.set(a.situation_id, entry);
     }
-    setDemographies(demoMap);
+    setDemographiesVictimes(demoVictimes);
+    setDemographiesIntimidateurs(demoIntimidateurs);
 
     setRawMotifs(((sitMotifs ?? []) as any[]).map((m) => ({
       situation_id: m.situation_id, label: (m.motif as any)?.label ?? "Inconnu",
@@ -504,13 +565,17 @@ export default function StatistiquesPage() {
     init();
   }, [router, loadStats]);
 
+  // La carte démographique active dépend du rôle choisi — jamais les deux
+  // en même temps.
+  const demographiesActives = roleFiltre === "victime" ? demographiesVictimes : demographiesIntimidateurs;
+
   // Filtrage + comptage des 3 graphiques de qualifications, recalculé
   // uniquement côté client à chaque changement de sélection.
   const situationRetenue = useCallback((situationId: string | null) => {
     if (!situationId) return true;
-    const demo = demographies.get(situationId);
+    const demo = demographiesActives.get(situationId);
     return passeFiltreGenre(demo, selectionGenre) && passeFiltreNiveau(demo, selectionNiveau);
-  }, [demographies, selectionGenre, selectionNiveau]);
+  }, [demographiesActives, selectionGenre, selectionNiveau]);
 
   const parMotif = useMemo(
     () => compterParCle(rawMotifs.filter((m) => situationRetenue(m.situation_id)), (m) => m.label),
@@ -525,15 +590,15 @@ export default function StatistiquesPage() {
     [rawLieux, situationRetenue]
   );
 
-  // Nombre de situations avec démographie connue qui passent les filtres,
-  // pour donner un repère à l'utilisateur.
+  // Nombre de situations, parmi celles ayant au moins un élève du rôle
+  // actif, qui passent les filtres — pour donner un repère à l'utilisateur.
   const { situationsRetenues, situationsTotal } = useMemo(() => {
-    const ids = Array.from(demographies.keys());
+    const ids = Array.from(demographiesActives.keys());
     return {
       situationsTotal: ids.length,
       situationsRetenues: ids.filter((id) => situationRetenue(id)).length,
     };
-  }, [demographies, situationRetenue]);
+  }, [demographiesActives, situationRetenue]);
 
   if (loading || !stats || !profile) {
     return (
@@ -616,12 +681,14 @@ export default function StatistiquesPage() {
           {filtresActifs && (
             <span className="rounded-full bg-[#F5F3FF] px-2.5 py-1 text-[11px] text-[#6656B8]">
               {situationsRetenues} / {situationsTotal} situations correspondent aux filtres
+              {" "}(parmi les {roleFiltre === "victime" ? "victimes" : "intimidateurs"})
             </span>
           )}
         </div>
 
         {/* Filtres */}
         <div className="rounded-2xl border border-[#EEEDF5] bg-white p-4 mb-4">
+          <SelecteurRole selection={roleFiltre} onChange={setRoleFiltre} />
           <div className="flex flex-wrap gap-6">
             <FiltreCheckboxes titre="Genre"  options={OPTIONS_GENRE}  selection={selectionGenre}  onChange={setSelectionGenre} />
             <FiltreCheckboxes titre="Niveau" options={OPTIONS_NIVEAU} selection={selectionNiveau} onChange={setSelectionNiveau} />
