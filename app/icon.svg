@@ -1,0 +1,25 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1440"/>
+      <stop offset="100%" stop-color="#3A3556"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fond arrondi -->
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+
+  <!-- Anneau lumineux (rappel du "phare" / faisceau) -->
+  <circle cx="256" cy="256" r="170" fill="none" stroke="#7C6BD6" stroke-width="10" opacity="0.35"/>
+
+  <!-- Monogramme pH -->
+  <text x="256" y="300"
+        font-family="Arial, Helvetica, sans-serif"
+        font-weight="700"
+        font-size="220"
+        fill="#7C6BD6"
+        text-anchor="middle">pH</text>
+
+  <!-- Petit point lumineux façon "phare" au-dessus du H -->
+  <circle cx="330" cy="150" r="14" fill="#7C6BD6"/>
+</svg>
