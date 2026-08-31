@@ -177,6 +177,25 @@ function IconCrayon({ size = 13 }: { size?: number }) {
   );
 }
 
+function IconParametres({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  );
+}
+
+function IconPoubelle({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+      <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+    </svg>
+  );
+}
+
 function CheckBox({ checked, onChange, loading = false, disabled = false }: {
   checked: boolean; onChange: () => void; loading?: boolean; disabled?: boolean;
 }) {
@@ -537,6 +556,12 @@ function OngletInfos({ situation, acteurs, profile, situationId, onRefresh, peut
    + modifie_par), plutôt que de dépendre d'un éventuel trigger côté
    base — ce qui garantit que CHAQUE modification est bien tracée,
    pas seulement la première.
+
+   Deux boutons distincts dans l'en-tête / le contenu déplié :
+   - le crayon "paramètres" (en-tête) ouvre l'édition des informations
+     du créneau lui-même (élève rencontré, date, heure de début/fin) ;
+   - le bouton "Modifier" (dans le contenu déplié, à côté du CR) reste
+     dédié à la rédaction/correction du texte du compte rendu.
    ============================================================ */
 function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefresh, onLectureCR, peutCompleter, peutModifier }: {
   creneau: CreneauAgenda; situationId: string;
@@ -544,11 +569,21 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
   onLectureCR: () => void;
   peutCompleter: boolean; peutModifier: boolean;
 }) {
-  const [ouvert, setOuvert]       = useState(false);
-  const [editingCR, setEditingCR] = useState(false);
-  const [contenu, setContenu]     = useState(creneau.cr?.contenu ?? "");
-  const [saving, setSaving]       = useState(false);
-  const [luLocal, setLuLocal]     = useState<boolean>(creneau.cr?.lu ?? true);
+  const [ouvert, setOuvert]           = useState(false);
+  const [editingCR, setEditingCR]     = useState(false);
+  const [contenu, setContenu]         = useState(creneau.cr?.contenu ?? "");
+  const [saving, setSaving]           = useState(false);
+  const [luLocal, setLuLocal]         = useState<boolean>(creneau.cr?.lu ?? true);
+
+  // Édition des paramètres du créneau (élève rencontré, date, horaires) —
+  // distincte de l'édition du contenu du compte rendu.
+  const [editingParams, setEditingParams]     = useState(false);
+  const [paramEleveId, setParamEleveId]       = useState(creneau.eleve_id ?? "");
+  const [paramDate, setParamDate]             = useState(creneau.date_creneau);
+  const [paramHeureDebut, setParamHeureDebut] = useState(creneau.heure_debut.slice(0, 5));
+  const [paramHeureFin, setParamHeureFin]     = useState(creneau.heure_fin.slice(0, 5));
+  const [savingParams, setSavingParams]       = useState(false);
+  const [paramError, setParamError]           = useState<string | null>(null);
 
   useEffect(() => {
     setLuLocal(creneau.cr?.lu ?? true);
@@ -564,6 +599,12 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
   const canEdit    = peutModifier || (peutCompleter && (creneau.referent_id === profile.id || creneau.referent_charge_id === profile.id));
   const infosEleve = buildInfosEleve(creneau, acteurs);
   const dateStr    = formatDateLong(creneau.date_creneau);
+
+  // Liste des élèves sélectionnables pour le rendez-vous : uniquement les
+  // acteurs déjà liés à la situation (pas tous les élèves de l'établissement).
+  const eleveOptions = (["victime","intimidateur","temoin","lanceur_alerte"] as RoleEleve[]).flatMap((role) =>
+    acteurs.filter((a) => a.eleve).filter((a) => a.role === role).map((a) => ({ acteur: a, role }))
+  );
 
   async function marquerCommeLu() {
     if (!creneau.cr) return;
@@ -638,6 +679,36 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
     setSaving(false); setEditingCR(false); onRefresh();
   }
 
+  function ouvrirEditionParametres(e: React.MouseEvent) {
+    e.stopPropagation();
+    setOuvert(true);
+    setEditingCR(false);
+    setEditingParams(true);
+    setParamEleveId(creneau.eleve_id ?? "");
+    setParamDate(creneau.date_creneau);
+    setParamHeureDebut(creneau.heure_debut.slice(0, 5));
+    setParamHeureFin(creneau.heure_fin.slice(0, 5));
+    setParamError(null);
+    if (nonLu) marquerCommeLu();
+  }
+
+  async function handleSaveParams() {
+    if (!canEdit) return;
+    if (paramHeureFin <= paramHeureDebut) {
+      setParamError("L'heure de fin doit être après l'heure de début.");
+      return;
+    }
+    setParamError(null);
+    setSavingParams(true);
+    await supabase.from("creneaux").update({
+      date_creneau: paramDate,
+      heure_debut: paramHeureDebut,
+      heure_fin: paramHeureFin,
+      eleve_id: paramEleveId || null,
+    }).eq("id", creneau.id);
+    setSavingParams(false); setEditingParams(false); onRefresh();
+  }
+
   return (
     <div className="rounded-2xl overflow-hidden border border-[#EEEDF5] shadow-sm">
       <div className="flex">
@@ -668,11 +739,11 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
                 </div>
               )}
               {canEdit && (
-                <button onClick={(e) => { e.stopPropagation(); setOuvert(true); setEditingCR(true); setContenu(creneau.cr?.contenu ?? ""); if (nonLu) marquerCommeLu(); }}
+                <button onClick={ouvrirEditionParametres}
                   className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E7E6EF]
                              bg-white text-[#6C6A80] hover:text-[#6656B8] hover:border-[#7C6BD6] transition"
-                  title={hasCR ? "Modifier le compte rendu" : "Rédiger le compte rendu"}>
-                  <IconCrayon />
+                  title="Modifier les paramètres de l'entretien">
+                  <IconParametres />
                 </button>
               )}
               <div className={`text-[#9A97AD] transition-transform duration-200 ${ouvert ? "rotate-180" : ""}`}>
@@ -687,7 +758,54 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
 
       {ouvert && (
         <div className="border-t border-[#EEEDF5] bg-white px-5 py-5">
-          {editingCR && canEdit ? (
+          {editingParams && canEdit ? (
+            <div className="space-y-4">
+              <p className="text-sm font-semibold text-[#1B1633]">Modifier les paramètres de l'entretien</p>
+              {paramError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{paramError}</div>}
+
+              <div>
+                <label className="block text-xs font-medium text-[#9A97AD] mb-1">Élève rencontré</label>
+                <select value={paramEleveId} onChange={(e) => setParamEleveId(e.target.value)} className={inputCls}>
+                  <option value="">— Aucun élève spécifié</option>
+                  {eleveOptions.map(({ acteur: a, role }) => (
+                    <option key={a.id} value={a.eleve!.id}>
+                      {ROLE_CONFIG[role].icon} {a.eleve!.prenom} {a.eleve!.nom}
+                      {a.eleve!.classe ? ` (${a.eleve!.classe})` : ""}
+                      {" — "}{ROLE_CONFIG[role].label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-[#9A97AD]">
+                  Le choix se limite aux personnes déjà associées à cette situation.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#9A97AD] mb-1">Date de l'entretien</label>
+                <input type="date" value={paramDate} onChange={(e) => setParamDate(e.target.value)} className={inputCls} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#9A97AD] mb-1">Heure de début</label>
+                  <input type="time" value={paramHeureDebut} onChange={(e) => setParamHeureDebut(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#9A97AD] mb-1">Heure de fin</label>
+                  <input type="time" value={paramHeureFin} onChange={(e) => setParamHeureFin(e.target.value)} className={inputCls} />
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => { setEditingParams(false); setParamError(null); }}
+                  className="flex-1 rounded-xl border border-[#E7E6EF] px-4 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA]">Annuler</button>
+                <button onClick={handleSaveParams} disabled={savingParams}
+                  className="flex-1 rounded-xl bg-[#1A1440] px-4 py-2 text-sm text-white hover:bg-[#2A1E5C] disabled:opacity-50 transition">
+                  {savingParams ? "Enregistrement…" : "Enregistrer"}
+                </button>
+              </div>
+            </div>
+          ) : editingCR && canEdit ? (
             <div className="space-y-3">
               <p className="text-sm font-semibold text-[#1B1633]">{hasCR ? "Modifier le compte rendu" : "Rédiger le compte rendu"}</p>
               <EditeurRiche
@@ -730,7 +848,7 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
                   </div>
                 </div>
                 {canEdit && (
-                  <button onClick={() => { setEditingCR(true); setContenu(creneau.cr!.contenu); }}
+                  <button onClick={() => { setEditingParams(false); setEditingCR(true); setContenu(creneau.cr!.contenu); }}
                     className="flex items-center gap-1.5 rounded-xl border border-[#E7E6EF] px-3 py-1.5
                                text-xs text-[#3A3556] hover:bg-[#F3F2FA] hover:text-[#6656B8] hover:border-[#7C6BD6] transition">
                     <IconCrayon /> Modifier
@@ -743,7 +861,7 @@ function CarteCreneauDepliable({ creneau, situationId, acteurs, profile, onRefre
             <div className="text-center py-4">
               <p className="text-sm text-[#9A97AD] mb-3">Aucun compte rendu rédigé pour cet entretien.</p>
               {canEdit && (
-                <button onClick={() => { setEditingCR(true); setContenu(""); }}
+                <button onClick={() => { setEditingParams(false); setEditingCR(true); setContenu(""); }}
                   className="flex items-center gap-2 rounded-xl bg-[#1A1440] px-4 py-2 text-sm font-medium text-white hover:bg-[#2A1E5C] transition mx-auto">
                   <IconCrayon size={14} /> Rédiger le compte rendu
                 </button>
@@ -1035,10 +1153,7 @@ function OngletNotes({ situationId, profile, peutCompleter }: {
                       </div>
                       {isAuteur && peutCompleter && (
                         <button onClick={() => handleSupprimer(note.id)} className="shrink-0 text-[#C4C2D4] hover:text-red-500 transition">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-                            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                          </svg>
+                          <IconPoubelle />
                         </button>
                       )}
                     </div>
@@ -1123,10 +1238,7 @@ function OngletDroits({ situationId, profile, allReferents }: {
                     )}
                     {isAdmin && (
                       <button onClick={() => handleSupprimer(d.id)} className="text-[#C4C2D4] hover:text-red-500 transition">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-                          <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                        </svg>
+                        <IconPoubelle />
                       </button>
                     )}
                   </div>
@@ -1459,6 +1571,55 @@ function OngletQualifications({ situationId, profile, peutModifier }: {
 }
 
 /* ============================================================
+   MODALE — Suppression de la situation (admin uniquement)
+   La suppression est explicite et en cascade côté application :
+   on efface d'abord tout le contenu rattaché (lectures de CR,
+   comptes rendus, créneaux, protagonistes, qualifications, droits)
+   avant de supprimer la situation elle-même, afin de ne pas dépendre
+   d'éventuelles contraintes ON DELETE CASCADE côté base.
+   ============================================================ */
+function ModalSupprimerSituation({ situation, onClose, onConfirm, deleting, error }: {
+  situation: Situation; onClose: () => void; onConfirm: () => void; deleting: boolean; error: string | null;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget && !deleting) onClose(); }}>
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-[#EEEDF5] px-5 py-4">
+          <h2 className="text-sm font-semibold text-red-700">⚠️ Supprimer la situation</h2>
+          {!deleting && (
+            <button onClick={onClose} className="h-7 w-7 rounded-full text-[#9A97AD] hover:bg-[#F3F2FA] transition flex items-center justify-center">✕</button>
+          )}
+        </div>
+        <div className="px-5 py-5 space-y-3">
+          {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+          <p className="text-sm text-[#3A3556]">
+            Vous êtes sur le point de supprimer définitivement la situation{" "}
+            <span className="font-semibold">{situation.reference ? `[${situation.reference}] ` : ""}{situation.titre}</span>.
+          </p>
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+            <p className="text-sm text-red-700">
+              Cette action est irréversible. Tous les entretiens, comptes rendus, messages,
+              qualifications et droits d'accès rattachés à cette situation seront également supprimés.
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 border-t border-[#EEEDF5] px-5 py-4">
+          <button onClick={onClose} disabled={deleting}
+            className="flex-1 rounded-xl border border-[#E7E6EF] px-3 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA] disabled:opacity-50 transition">
+            Annuler
+          </button>
+          <button onClick={onConfirm} disabled={deleting}
+            className="flex-1 rounded-xl bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition">
+            {deleting ? "Suppression…" : "Supprimer définitivement"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    Page principale
    ============================================================ */
 export default function FicheSituationPage() {
@@ -1477,12 +1638,18 @@ export default function FicheSituationPage() {
   // cette situation n'a pas encore été ouvert par l'utilisateur connecté.
   const [entretiensNonLus, setEntretiensNonLus] = useState(false);
 
+  // Suppression de la situation (admin uniquement)
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting]               = useState(false);
+  const [deleteError, setDeleteError]         = useState<string | null>(null);
+
   // "modification" couvre le contrôle complet : gravité, statut, infos générales
   // et qualification de la situation (les admins et le créateur ont toujours ce niveau).
   // "completion" (ou plus) permet d'ajouter du contenu (planifier un entretien,
   // rédiger un CR, écrire dans le tchat, ajouter un protagoniste).
   const peutModifier  = monNiveau === "modification";
   const peutCompleter = monNiveau === "completion" || monNiveau === "modification";
+  const isAdmin       = profile?.role === "admin";
 
   const loadSituation = useCallback(async () => {
     const [sitRes, acteursRes] = await Promise.all([
@@ -1565,6 +1732,45 @@ export default function FicheSituationPage() {
     init();
   }, [router, loadSituation, checkEntretiensNonLus, situationId]);
 
+  async function handleSupprimerSituation() {
+    if (!isAdmin) return;
+    setDeleting(true); setDeleteError(null);
+    try {
+      // 1. Comptes rendus (entretiens + notes) de la situation, pour purger
+      //    d'abord leurs éventuelles traces de lecture.
+      const { data: crs } = await supabase
+        .from("comptes_rendus")
+        .select("id")
+        .eq("situation_id", situationId);
+      const crIds = (crs ?? []).map((c: any) => c.id);
+      if (crIds.length > 0) {
+        await supabase.from("cr_lectures").delete().in("compte_rendu_id", crIds);
+      }
+      await supabase.from("comptes_rendus").delete().eq("situation_id", situationId);
+
+      // 2. Créneaux (entretiens planifiés/réalisés) liés à la situation.
+      await supabase.from("creneaux").delete().eq("situation_id", situationId);
+
+      // 3. Protagonistes et qualifications.
+      await supabase.from("situation_eleves").delete().eq("situation_id", situationId);
+      await supabase.from("situation_motifs").delete().eq("situation_id", situationId);
+      await supabase.from("situation_manifestations").delete().eq("situation_id", situationId);
+      await supabase.from("situation_lieux").delete().eq("situation_id", situationId);
+
+      // 4. Droits d'accès spécifiques à cette situation.
+      await supabase.from("referent_situation_droits").delete().eq("situation_id", situationId);
+
+      // 5. La situation elle-même.
+      const { error } = await supabase.from("situations").delete().eq("id", situationId);
+      if (error) throw error;
+
+      router.push("/situations");
+    } catch (e: any) {
+      setDeleting(false);
+      setDeleteError(e?.message ?? "Une erreur est survenue pendant la suppression.");
+    }
+  }
+
   const ONGLETS: { key: OngletType; label: string }[] = [
     { key: "infos",           label: "Infos"          },
     { key: "qualifications",  label: "Qualification"  },
@@ -1619,6 +1825,16 @@ export default function FicheSituationPage() {
   return (
     <div className="min-h-screen bg-[#FBFBFD] text-[#1B1633]">
 
+      {showDeleteModal && (
+        <ModalSupprimerSituation
+          situation={situation}
+          onClose={() => { if (!deleting) { setShowDeleteModal(false); setDeleteError(null); } }}
+          onConfirm={handleSupprimerSituation}
+          deleting={deleting}
+          error={deleteError}
+        />
+      )}
+
       {/* 📱 MOBILE */}
       <div className="lg:hidden flex flex-col min-h-screen">
         <header className="sticky top-0 z-10 border-b border-[#EEEDF5] bg-white shadow-sm">
@@ -1627,10 +1843,19 @@ export default function FicheSituationPage() {
               className="mb-1 text-xs text-[#6656B8] hover:underline">← Situations</button>
             <div className="flex items-start justify-between gap-2">
               <h1 className="text-base font-semibold text-[#1B1633] leading-snug">{situation.titre}</h1>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium
-                               ${STATUT_CONFIG[situation.statut].bg} ${STATUT_CONFIG[situation.statut].text}`}>
-                {STATUT_CONFIG[situation.statut].label}
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isAdmin && (
+                  <button onClick={() => setShowDeleteModal(true)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E7E6EF] bg-white text-[#9A97AD] hover:text-red-600 hover:border-red-300 transition"
+                    title="Supprimer la situation">
+                    <IconPoubelle />
+                  </button>
+                )}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium
+                                 ${STATUT_CONFIG[situation.statut].bg} ${STATUT_CONFIG[situation.statut].text}`}>
+                  {STATUT_CONFIG[situation.statut].label}
+                </span>
+              </div>
             </div>
             {monNiveau === "lecture" && profile.role !== "admin" && (
               <p className="mt-1.5 text-[11px] text-[#9A97AD]">🔒 Accès en lecture seule</p>
@@ -1654,10 +1879,19 @@ export default function FicheSituationPage() {
                 <p className="mt-1 text-xs text-[#9A97AD]">🔒 Accès en lecture seule</p>
               )}
             </div>
-            <span className={`shrink-0 rounded-full px-3 py-1 text-sm font-medium
-                             ${STATUT_CONFIG[situation.statut].bg} ${STATUT_CONFIG[situation.statut].text}`}>
-              {STATUT_CONFIG[situation.statut].label}
-            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              {isAdmin && (
+                <button onClick={() => setShowDeleteModal(true)}
+                  className="flex h-9 items-center gap-1.5 rounded-xl border border-[#E7E6EF] bg-white px-3 text-sm text-[#9A97AD] hover:text-red-600 hover:border-red-300 transition"
+                  title="Supprimer la situation">
+                  <IconPoubelle /> Supprimer
+                </button>
+              )}
+              <span className={`rounded-full px-3 py-1 text-sm font-medium
+                               ${STATUT_CONFIG[situation.statut].bg} ${STATUT_CONFIG[situation.statut].text}`}>
+                {STATUT_CONFIG[situation.statut].label}
+              </span>
+            </div>
           </div>
         </div>
         {renderTabBar()}
