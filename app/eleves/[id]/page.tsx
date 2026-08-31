@@ -178,9 +178,10 @@ function CarteEntretien({ entretien }: { entretien: Entretien }) {
                   </p>
                 </div>
               </div>
-              <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">
-                {entretien.cr!.contenu}
-              </p>
+              <div
+                className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed [&_a]:no-underline"
+                dangerouslySetInnerHTML={{ __html: entretien.cr!.contenu }}
+              />
             </div>
           ) : (
             <p className="text-sm text-[#9A97AD] text-center py-2">
@@ -212,7 +213,10 @@ function CarteNote({ note }: { note: NoteItem }) {
       <div className="flex-1 bg-white px-4 py-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed">{note.contenu}</p>
+            <div
+              className="text-sm text-[#3A3556] whitespace-pre-wrap leading-relaxed [&_a]:no-underline"
+              dangerouslySetInnerHTML={{ __html: note.contenu }}
+            />
             <div className="mt-2 flex items-center gap-2 flex-wrap">
               {note.auteur && (
                 <div className="flex items-center gap-1.5">
