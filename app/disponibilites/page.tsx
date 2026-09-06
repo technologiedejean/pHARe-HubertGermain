@@ -19,26 +19,30 @@ type Etat = { A: boolean; B: boolean; fusion: boolean };
    ============================================================ */
 const AXE_DEB = 8 * 60 + 15;   // 8h15
 const AXE_FIN = 17 * 60 + 30;  // 17h30
-const PXMIN   = 1.35;
+const PXMIN   = 1.5;
 const HAUTEUR = (AXE_FIN - AXE_DEB) * PXMIN;
 
-type Periode = { code: string; d: string; f: string };
+type Periode = { code: string; d: string; f: string; label?: string; pause?: boolean };
 
 const STD: Periode[] = [
-  { code: "M1", d: "9h00",  f: "9h55"  },
-  { code: "M2", d: "9h55",  f: "10h50" },
-  { code: "M3", d: "11h05", f: "12h00" },
-  { code: "M4", d: "12h00", f: "12h55" },
-  { code: "S1", d: "13h25", f: "14h20" },
-  { code: "S2", d: "14h20", f: "15h15" },
-  { code: "S3", d: "15h30", f: "16h25" },
-  { code: "S4", d: "16h25", f: "17h20" },
+  { code: "M1",   d: "9h00",  f: "9h55"  },
+  { code: "M2",   d: "9h55",  f: "10h50" },
+  { code: "REC1", d: "10h50", f: "11h05", label: "Récré",  pause: true },
+  { code: "M3",   d: "11h05", f: "12h00" },
+  { code: "M4",   d: "12h00", f: "12h55" },
+  { code: "MIDI", d: "12h55", f: "13h25", label: "Pause méridienne", pause: true },
+  { code: "S1",   d: "13h25", f: "14h20" },
+  { code: "S2",   d: "14h20", f: "15h15" },
+  { code: "REC2", d: "15h15", f: "15h30", label: "Récré",  pause: true },
+  { code: "S3",   d: "15h30", f: "16h25" },
+  { code: "S4",   d: "16h25", f: "17h20" },
 ];
 const MER: Periode[] = [
-  { code: "M1", d: "8h30",  f: "9h25"  },
-  { code: "M2", d: "9h25",  f: "10h20" },
-  { code: "M3", d: "10h35", f: "11h30" },
-  { code: "M4", d: "11h30", f: "12h25" },
+  { code: "M1",   d: "8h30",  f: "9h25"  },
+  { code: "M2",   d: "9h25",  f: "10h20" },
+  { code: "REC1", d: "10h20", f: "10h35", label: "Récré", pause: true },
+  { code: "M3",   d: "10h35", f: "11h30" },
+  { code: "M4",   d: "11h30", f: "12h25" },
 ];
 
 const JOURS = [
@@ -343,22 +347,28 @@ export default function DisponibilitesPage() {
             {j.periodes.map((p) => {
               const c = etat[j.id][p.code];
               const top = topPx(p.d), height = (toMin(p.f) - toMin(p.d)) * PXMIN - 2;
+              const compact = height < 34;
+              const titre   = p.pause ? (p.label ?? "Pause") : p.code;
               return (
                 <div key={p.code}
-                  className="group absolute left-1 right-1 flex overflow-hidden rounded-lg border border-[#EEEDF5] bg-white"
+                  className={`group absolute left-1 right-1 flex overflow-hidden rounded-lg
+                    ${p.pause ? "border border-dashed border-[#D9D5EC] bg-[#F3F1FB]" : "border border-[#EEEDF5] bg-white"}`}
                   style={{ top, height }}>
                   {c.fusion ? (
-                    <DemiCase code={p.code} heure={`${p.d}–${p.f}`} tag="A+B" on={c.A} couleur={maCouleur}
-                      onClick={() => clicFusionne(j.id, p.code)} />
+                    <DemiCase titre={titre} heure={`${p.d}–${p.f}`} tag="A+B" on={c.A} couleur={maCouleur}
+                      compact={compact} pause={p.pause} onClick={() => clicFusionne(j.id, p.code)} />
                   ) : (
                     <>
-                      <DemiCase code={p.code} heure={`${p.d}–${p.f}`} tag="A" on={c.A} couleur={maCouleur} onClick={() => clicA(j.id, p.code)} />
-                      <DemiCase code="" heure="" tag="B" on={c.B} couleur={maCouleur} onClick={() => clicB(j.id, p.code)} bordure />
+                      <DemiCase titre={titre} heure={`${p.d}–${p.f}`} tag="A" on={c.A} couleur={maCouleur}
+                        compact={compact} pause={p.pause} onClick={() => clicA(j.id, p.code)} />
+                      <DemiCase titre="" heure="" tag="B" on={c.B} couleur={maCouleur}
+                        compact={compact} pause={p.pause} onClick={() => clicB(j.id, p.code)} bordure />
                     </>
                   )}
                   <button onClick={(e) => { e.stopPropagation(); toggleFusion(j.id, p.code); }}
                     title={c.fusion ? "Séparer A / B" : "Fusionner A = B"}
-                    className={`absolute right-1 top-1 z-10 flex h-[18px] w-[18px] items-center justify-center rounded-full border text-[10px] transition
+                    className={`absolute right-1 z-10 flex items-center justify-center rounded-full border transition
+                      ${compact ? "top-0.5 h-[15px] w-[15px] text-[9px]" : "top-1 h-[18px] w-[18px] text-[10px]"}
                       ${c.fusion ? "border-[#FCEA00] bg-[#FCEA00] text-[#1A1440] opacity-100"
                                  : "border-[#EEEDF5] bg-white text-[#6C6A80] opacity-0 group-hover:opacity-100"}`}>⇔</button>
                 </div>
@@ -387,12 +397,16 @@ export default function DisponibilitesPage() {
             ))}
             {j.periodes.map((p) => {
               const top = topPx(p.d), height = (toMin(p.f) - toMin(p.d)) * PXMIN - 2;
+              const compact = height < 34;
+              const etiquette = p.pause ? (p.label ?? "Pause") : p.code;
               const a = refsDispo(j.id, p.code, "A"), b = refsDispo(j.id, p.code, "B");
               return (
-                <div key={p.code} className="absolute left-1 right-1 flex overflow-hidden rounded-lg border border-[#EEEDF5] bg-white"
+                <div key={p.code}
+                  className={`absolute left-1 right-1 flex overflow-hidden rounded-lg
+                    ${p.pause ? "border border-dashed border-[#D9D5EC] bg-[#F3F1FB]" : "border border-[#EEEDF5] bg-white"}`}
                   style={{ top, height }}>
-                  <PastilleZone code={p.code} tag="A" refs={a} />
-                  <PastilleZone code="" tag="B" refs={b} bordure />
+                  <PastilleZone etiquette={etiquette} tag="A" refs={a} compact={compact} />
+                  <PastilleZone etiquette="" tag="B" refs={b} compact={compact} bordure />
                 </div>
               );
             })}
@@ -422,7 +436,7 @@ export default function DisponibilitesPage() {
         return (
           <div key={p.code} className="rounded-xl border border-[#EEEDF5] bg-white p-2.5">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-semibold">{p.code} <span className="font-normal text-[#6C6A80]">{p.d}–{p.f}</span></span>
+              <span className="text-sm font-semibold">{p.pause ? p.label : p.code} <span className="font-normal text-[#6C6A80]">{p.d}–{p.f}</span></span>
               <button onClick={() => toggleFusion(jourMobile, p.code)}
                 className={`rounded-lg border px-2 py-0.5 text-[11px] ${c.fusion ? "border-[#FCEA00] bg-[#FCEA00] text-[#1A1440]" : "border-[#E7E6EF] bg-white text-[#6C6A80]"}`}>
                 {c.fusion ? "A = B" : "A / B séparés"} ⇔
@@ -449,7 +463,7 @@ export default function DisponibilitesPage() {
         const a = refsDispo(jourMobile, p.code, "A"), b = refsDispo(jourMobile, p.code, "B");
         return (
           <div key={p.code} className="rounded-xl border border-[#EEEDF5] bg-white p-2.5">
-            <div className="mb-1.5 text-sm font-semibold">{p.code} <span className="font-normal text-[#6C6A80]">{p.d}–{p.f}</span></div>
+            <div className="mb-1.5 text-sm font-semibold">{p.pause ? p.label : p.code} <span className="font-normal text-[#6C6A80]">{p.d}–{p.f}</span></div>
             <div className="grid grid-cols-2 gap-2">
               <ZoneMobile tag="A" refs={a} />
               <ZoneMobile tag="B" refs={b} />
@@ -536,31 +550,49 @@ export default function DisponibilitesPage() {
 /* ============================================================
    Sous-composants (module-level : pas de remount au clavier)
    ============================================================ */
-function DemiCase({ code, heure, tag, on, couleur, onClick, bordure }:
-  { code: string; heure: string; tag: string; on: boolean; couleur: string; onClick: () => void; bordure?: boolean }) {
+function DemiCase({ titre, heure, tag, on, couleur, onClick, bordure, compact, pause }:
+  { titre: string; heure: string; tag: string; on: boolean; couleur: string; onClick: () => void;
+    bordure?: boolean; compact?: boolean; pause?: boolean }) {
+  const surbrillance = on ? "text-white" : `text-[#6C6A80] ${pause ? "hover:bg-[#EAE6F8]" : "hover:bg-[#F3F2FA]"}`;
+  if (compact) {
+    return (
+      <div onClick={onClick} title={`${titre} ${heure}`.trim()}
+        className={`flex flex-1 cursor-pointer select-none items-center justify-center px-1 text-[10px] font-semibold transition ${bordure ? "border-l border-dashed border-[#EEEDF5]" : ""} ${surbrillance}`}
+        style={on ? { backgroundColor: couleur } : undefined}>
+        {tag}
+      </div>
+    );
+  }
   return (
     <div onClick={onClick}
-      className={`flex flex-1 cursor-pointer select-none flex-col justify-between p-1.5 text-[11px] transition ${bordure ? "border-l border-dashed border-[#EEEDF5]" : ""} ${on ? "text-white" : "text-[#6C6A80] hover:bg-[#F3F2FA]"}`}
+      className={`flex flex-1 cursor-pointer select-none flex-col justify-between p-1.5 text-[11px] transition ${bordure ? "border-l border-dashed border-[#EEEDF5]" : ""} ${surbrillance}`}
       style={on ? { backgroundColor: couleur } : undefined}>
-      <span className="font-bold">{code}</span>
+      <span className={pause ? "font-semibold truncate" : "font-bold"}>{titre}</span>
       <span className="font-semibold opacity-90">{tag}</span>
       <span className="text-[10px] opacity-85 whitespace-nowrap">{heure || "\u00A0"}</span>
     </div>
   );
 }
 
-function PastilleZone({ code, tag, refs, bordure }:
-  { code: string; tag: string; refs: Personne[]; bordure?: boolean }) {
+function PastilleZone({ etiquette, tag, refs, bordure, compact }:
+  { etiquette: string; tag: string; refs: Personne[]; bordure?: boolean; compact?: boolean }) {
+  const dots = refs.length === 0
+    ? <span className="text-[10px] text-[#C9C7D6]">—</span>
+    : refs.map((r) => (
+        <span key={r.id} title={nomComplet(r)} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.couleur }} />
+      ));
+  if (compact) {
+    return (
+      <div className={`flex flex-1 items-center gap-1 px-1.5 ${bordure ? "border-l border-dashed border-[#EEEDF5]" : ""}`}>
+        <span className="text-[9px] font-semibold text-[#9B98AE]">{tag}</span>
+        <div className="flex flex-wrap gap-0.5">{dots}</div>
+      </div>
+    );
+  }
   return (
     <div className={`flex flex-1 flex-col p-1.5 text-[11px] ${bordure ? "border-l border-dashed border-[#EEEDF5]" : ""}`}>
-      <span className="mb-1 text-[10px] font-semibold text-[#9B98AE]">{code}{code ? " · " : ""}{tag}</span>
-      <div className="flex flex-wrap gap-1">
-        {refs.length === 0
-          ? <span className="text-[10px] text-[#C9C7D6]">—</span>
-          : refs.map((r) => (
-              <span key={r.id} title={nomComplet(r)} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.couleur }} />
-            ))}
-      </div>
+      <span className="mb-1 truncate text-[10px] font-semibold text-[#9B98AE]">{etiquette}{etiquette ? " · " : ""}{tag}</span>
+      <div className="flex flex-wrap gap-1">{dots}</div>
     </div>
   );
 }
