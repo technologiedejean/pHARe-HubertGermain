@@ -73,9 +73,11 @@ export default function DisponibilitesPage() {
   const [loading, setLoading]   = useState(true);
   const [mode, setMode]         = useState<"edition" | "consultation">("edition");
 
-  // Édition (mes dispos)
+  // Édition (dispos de la cible : soi-même, ou un autre usager si admin)
   const [etat, setEtat]         = useState<Record<number, Record<string, Etat>>>({});
+  const [cibleId, setCibleId]   = useState<string>("");   // dont on édite les dispos
   const dbKeysRef               = useRef<Map<string, string>>(new Map()); // key -> row id
+  const allRowsRef              = useRef<DispoRow[]>([]);  // toutes les lignes en mémoire
   const [saving, setSaving]     = useState(false);
   const [message, setMessage]   = useState<{ type: "ok" | "err"; texte: string } | null>(null);
 
@@ -86,12 +88,13 @@ export default function DisponibilitesPage() {
   // Mobile : jour affiché
   const [jourMobile, setJourMobile] = useState<number>(1);
 
-  /* ---------- Construction de l'état d'édition depuis les lignes ---------- */
-  const construireEtat = useCallback((rows: DispoRow[]) => {
+  /* ---------- Construction de l'état d'édition pour une cible ---------- */
+  const construireEtat = useCallback((rows: DispoRow[], cible: string) => {
     const e: Record<number, Record<string, Etat>> = {};
     const dbKeys = new Map<string, string>();
     for (const j of JOURS) { e[j.id] = {}; for (const p of j.periodes) e[j.id][p.code] = { A: false, B: false, fusion: true }; }
     for (const r of rows) {
+      if (r.referent_id !== cible) continue;
       if (!e[r.jour_semaine]?.[r.code]) continue;
       e[r.jour_semaine][r.code][r.semaine] = true;
       dbKeys.set(keyDispo(r.jour_semaine, r.code, r.semaine), r.id);
@@ -104,15 +107,16 @@ export default function DisponibilitesPage() {
     setEtat(e);
   }, []);
 
-  /* ---------- Chargement ---------- */
-  const chargerTout = useCallback(async (monId: string) => {
+  /* ---------- Chargement (garde toutes les lignes, bâtit l'état de la cible) ---------- */
+  const chargerTout = useCallback(async (cible: string) => {
     const { data } = await supabase
       .from("disponibilites")
       .select("id, referent_id, jour_semaine, code, semaine");
     const rows = (data ?? []) as DispoRow[];
+    allRowsRef.current = rows;
 
-    // Mes dispos → édition
-    construireEtat(rows.filter((r) => r.referent_id === monId));
+    // Dispos de la cible → édition
+    construireEtat(rows, cible);
 
     // Toutes les dispos → consultation
     const map = new Map<string, Set<string>>();
@@ -139,6 +143,7 @@ export default function DisponibilitesPage() {
       const liste = (gens ?? []) as Personne[];
       setPersonnes(liste);
       setSelection(new Set(prof ? [prof.id] : []));
+      setCibleId(prof.id);
 
       await chargerTout(prof.id);
       setLoading(false);
@@ -187,12 +192,21 @@ export default function DisponibilitesPage() {
     });
     setMessage(null);
   }
-  function annuler() { if (profile) construireEtat(rowsFromDb()); setMessage(null); }
+  function annuler() { if (profile) construireEtat(rowsFromDb(), cibleId); setMessage(null); }
   function rowsFromDb(): DispoRow[] {
     return Array.from(dbKeysRef.current.entries()).map(([k, id]) => {
       const [j, code, s] = k.split("|");
-      return { id, referent_id: profile!.id, jour_semaine: Number(j), code, semaine: s as Semaine };
+      return { id, referent_id: cibleId, jour_semaine: Number(j), code, semaine: s as Semaine };
     });
+  }
+
+  /* ---------- Changement de cible (admin) ---------- */
+  function changerCible(id: string) {
+    if (id === cibleId) return;
+    if (dirty && !confirm("Des modifications ne sont pas enregistrées. Changer de personne quand même ?")) return;
+    setCibleId(id);
+    setMessage(null);
+    construireEtat(allRowsRef.current, id);
   }
 
   /* ---------- Enregistrement ---------- */
@@ -208,12 +222,12 @@ export default function DisponibilitesPage() {
     }
     if (!erreur && aInserer.length > 0) {
       const rows = aInserer.map((k) => { const [j, code, s] = k.split("|");
-        return { referent_id: profile.id, jour_semaine: Number(j), code, semaine: s as Semaine }; });
+        return { referent_id: cibleId, jour_semaine: Number(j), code, semaine: s as Semaine }; });
       const { error } = await supabase.from("disponibilites").insert(rows);
       if (error) erreur = error.message;
     }
 
-    await chargerTout(profile.id);
+    await chargerTout(cibleId);
     setSaving(false);
     setMessage(erreur ? { type: "err", texte: `Erreur : ${erreur}` } : { type: "ok", texte: "Disponibilités enregistrées." });
   }
@@ -238,7 +252,24 @@ export default function DisponibilitesPage() {
     );
   }
 
-  const maCouleur = profile.couleur;
+  const estAdmin   = profile.role === "admin";
+  const cible      = personnes.find((p) => p.id === cibleId);
+  const cibleNom   = cible ? nomComplet(cible) : nomComplet(profile);
+  const maCouleur  = cible?.couleur ?? profile.couleur;
+  const editeAutre = cibleId !== profile.id;
+
+  /* ---------- Sélecteur de cible d'édition (admin) ---------- */
+  const SelecteurCible = () => (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-[#6C6A80]">Disponibilités de</label>
+      <select value={cibleId} onChange={(e) => changerCible(e.target.value)}
+        className="w-full rounded-xl border border-[#E7E6EF] bg-white px-3 py-2 text-sm text-[#1B1633] focus:outline-none focus:ring-2 focus:ring-[#7C6BD6]">
+        {personnes.map((p) => (
+          <option key={p.id} value={p.id}>{nomComplet(p)}{p.id === profile.id ? " (moi)" : ""}</option>
+        ))}
+      </select>
+    </div>
+  );
 
   /* ---------- Bascule Édition / Consultation ---------- */
   const Bascule = () => (
@@ -492,7 +523,12 @@ export default function DisponibilitesPage() {
         <main className="flex-1 px-4 py-4 space-y-4">
           {mode === "edition" ? (
             <>
-              <p className="text-xs text-[#6C6A80]">Coche les créneaux libres de ton emploi du temps où tu peux mener un entretien ou une réunion.</p>
+              {estAdmin && <SelecteurCible />}
+              <p className="text-xs text-[#6C6A80]">
+                {editeAutre
+                  ? `Vous modifiez les disponibilités de ${cibleNom}.`
+                  : "Coche les créneaux libres de ton emploi du temps où tu peux mener un entretien ou une réunion."}
+              </p>
               <OngletsJours />
               <ListeEditionMobile />
               <Actions />
@@ -517,12 +553,18 @@ export default function DisponibilitesPage() {
           <Bascule />
           {mode === "edition" ? (
             <>
+              {estAdmin && <SelecteurCible />}
               <div className="rounded-xl border border-[#EEEDF5] bg-white p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="h-3 w-3 rounded-full" style={{ backgroundColor: maCouleur }} />
-                  <span className="font-medium">{nomComplet(profile)}</span>
+                  <span className="font-medium">{cibleNom}</span>
+                  {editeAutre && <span className="rounded-md bg-[#F5F3FF] px-1.5 py-0.5 text-[10px] font-semibold text-[#6656B8]">édité par vous</span>}
                 </div>
-                <p className="mt-2 text-xs text-[#6C6A80]">Clique une case pour te rendre disponible. Le bouton ⇔ fusionne la semaine A et la semaine B.</p>
+                <p className="mt-2 text-xs text-[#6C6A80]">
+                  {editeAutre
+                    ? "Clique une case pour rendre cette personne disponible. Le bouton ⇔ fusionne les semaines A et B."
+                    : "Clique une case pour te rendre disponible. Le bouton ⇔ fusionne la semaine A et la semaine B."}
+                </p>
               </div>
               <Actions />
             </>
@@ -534,7 +576,7 @@ export default function DisponibilitesPage() {
         <div className="flex-1 flex flex-col overflow-hidden px-6 py-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xl font-semibold">
-              {mode === "edition" ? `Ma semaine type — ${nomComplet(profile)}` : "Disponibilités des référents"}
+              {mode === "edition" ? `Semaine type — ${cibleNom}` : "Disponibilités des référents"}
             </h2>
             {mode === "edition" && dirty && <span className="text-xs text-[#6656B8]">Modifications non enregistrées</span>}
           </div>
