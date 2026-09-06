@@ -623,7 +623,8 @@ function PastilleZone({ etiquette, tag, refs, bordure, compact }:
     : refs.map((r) => (
         <span key={r.id} className="group/dot relative inline-flex">
           <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/60" style={{ backgroundColor: r.couleur }} />
-          <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#1A1440] px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity duration-100 group-hover/dot:opacity-100">
+          <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-full border-2 bg-white px-2.5 py-1 text-[11px] font-semibold shadow-md group-hover/dot:block"
+            style={{ color: r.couleur, borderColor: r.couleur }}>
             {nomComplet(r)}
           </span>
         </span>
