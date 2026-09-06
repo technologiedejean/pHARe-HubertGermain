@@ -54,6 +54,7 @@ const NAV_ITEMS = [
   { href: "/reunions",   label: "Réunions",         icon: "🗓️" },
   { href: "/eleves",     label: "Élèves",           icon: "👤" },
   { href: "/agenda",     label: "Agenda",           icon: "📅" },
+  { href: "/disponibilites", label: "Disponibilités", icon: "🕒" },
   { href: "/referents",  label: "Référents",        icon: "👥", adminOnly: true },
   { href: "/statistiques", label: "Statistiques", icon: "📊" },
   { href: "/parametres", label: "Paramètres",       icon: "⚙️", adminOnly: true },
