@@ -433,7 +433,7 @@ export default function DisponibilitesPage() {
               const a = refsDispo(j.id, p.code, "A"), b = refsDispo(j.id, p.code, "B");
               return (
                 <div key={p.code}
-                  className={`absolute left-1 right-1 flex overflow-hidden rounded-lg
+                  className={`absolute left-1 right-1 flex rounded-lg
                     ${p.pause ? "border border-dashed border-[#D9D5EC] bg-[#F3F1FB]" : "border border-[#EEEDF5] bg-white"}`}
                   style={{ top, height }}>
                   <PastilleZone etiquette={etiquette} tag="A" refs={a} compact={compact} />
@@ -621,7 +621,12 @@ function PastilleZone({ etiquette, tag, refs, bordure, compact }:
   const dots = refs.length === 0
     ? <span className="text-[10px] text-[#C9C7D6]">—</span>
     : refs.map((r) => (
-        <span key={r.id} title={nomComplet(r)} className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: r.couleur }} />
+        <span key={r.id} className="group/dot relative inline-flex">
+          <span className="h-2.5 w-2.5 rounded-full ring-1 ring-white/60" style={{ backgroundColor: r.couleur }} />
+          <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#1A1440] px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity duration-100 group-hover/dot:opacity-100">
+            {nomComplet(r)}
+          </span>
+        </span>
       ));
   if (compact) {
     return (
