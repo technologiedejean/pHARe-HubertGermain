@@ -401,12 +401,12 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
                 const dH   = ((heureEnMinutes(p.fin) - heureEnMinutes(p.deb)) / 60) * PX_PAR_HEURE;
                 return (
                   <div key={`disp-${p.code}`} className="absolute flex gap-[1px] pointer-events-none"
-                    style={{ top: dTop + 1, height: Math.max(dH - 2, 8), left: 1, zIndex: 5 }}>
+                    style={{ top: dTop + 1, height: Math.max(dH - 2, 8), left: 1 }}>
                     {refs.map((r) => (
                       <div key={r.id} onClick={(e) => e.stopPropagation()}
-                        className="group/disp relative h-full w-[5px] rounded-full pointer-events-auto cursor-default"
-                        style={{ backgroundColor: r.couleur, opacity: 0.9 }}>
-                        <span className="pointer-events-none absolute left-full top-1/2 z-30 ml-1 hidden -translate-y-1/2 whitespace-nowrap rounded-full border-2 bg-white px-2 py-0.5 text-[10px] font-semibold shadow-md group-hover/disp:block"
+                        className="group/disp relative z-0 hover:z-40 h-full w-[5px] rounded-full pointer-events-auto cursor-default"
+                        style={{ backgroundColor: r.couleur }}>
+                        <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-1 hidden -translate-y-1/2 whitespace-nowrap rounded-full border-2 bg-white px-2 py-0.5 text-[10px] font-semibold shadow-lg group-hover/disp:block"
                           style={{ color: r.couleur, borderColor: r.couleur }}>
                           {r.prenom} {r.nom}
                         </span>
