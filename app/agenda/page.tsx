@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 type Referent = { id: string; nom: string; prenom: string; couleur: string; role?: "admin" | "referent" };
 type Situation = { id: string; titre: string; reference: string | null };
 type Eleve = { id: string; nom: string; prenom: string; classe: string };
+type DispoRow = { referent_id: string; jour_semaine: number; code: string; semaine: "A" | "B" };
 
 type Creneau = {
   id: string;
@@ -57,6 +58,45 @@ const MOIS_LONGS   = [
 ];
 
 const REUNION_VALUE = "__reunion__";
+
+/* ============================================================
+   Disponibilités : alternance semaine A / B et grille horaire
+   Ancre : lundi 7 septembre 2026 = semaine B, puis alternance.
+   ============================================================ */
+const ANCRE_LUNDI_B = new Date(2026, 8, 7); // 7 sept. 2026 (lundi), semaine B
+
+function semaineDeDate(d: Date): "A" | "B" {
+  const lundi   = startOfWeek(d);
+  const ancre   = startOfWeek(ANCRE_LUNDI_B);
+  const semaines = Math.round((lundi.getTime() - ancre.getTime()) / (7 * 24 * 3600 * 1000));
+  return (((semaines % 2) + 2) % 2 === 0) ? "B" : "A"; // ancre = B
+}
+
+// Horaires réels par créneau (identiques à la page Disponibilités).
+type DispoPeriode = { code: string; deb: string; fin: string };
+const DISPO_STD: DispoPeriode[] = [
+  { code: "M1",   deb: "09:00", fin: "09:55" },
+  { code: "M2",   deb: "09:55", fin: "10:50" },
+  { code: "REC1", deb: "10:50", fin: "11:05" },
+  { code: "M3",   deb: "11:05", fin: "12:00" },
+  { code: "M4",   deb: "12:00", fin: "12:55" },
+  { code: "MIDI", deb: "12:55", fin: "13:25" },
+  { code: "S1",   deb: "13:25", fin: "14:20" },
+  { code: "S2",   deb: "14:20", fin: "15:15" },
+  { code: "REC2", deb: "15:15", fin: "15:30" },
+  { code: "S3",   deb: "15:30", fin: "16:25" },
+  { code: "S4",   deb: "16:25", fin: "17:20" },
+];
+const DISPO_MER: DispoPeriode[] = [
+  { code: "M1",   deb: "08:30", fin: "09:25" },
+  { code: "M2",   deb: "09:25", fin: "10:20" },
+  { code: "REC1", deb: "10:20", fin: "10:35" },
+  { code: "M3",   deb: "10:35", fin: "11:30" },
+  { code: "M4",   deb: "11:30", fin: "12:25" },
+];
+function periodesPourJour(jourSemaine: number): DispoPeriode[] {
+  return jourSemaine === 3 ? DISPO_MER : DISPO_STD;
+}
 
 /* ============================================================
    Helpers dates
@@ -252,11 +292,12 @@ function CreneauBlock({
 /* ============================================================
    VueSemaine
    ============================================================ */
-function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, onClickCase, onRejoindre }: {
+function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, onClickCase, onRejoindre, showDispos, dispos, dispoReferents }: {
   semaineDeb: Date; creneaux: Creneau[]; referents: Referent[]; profile: Profile;
   onClickCreneau: (c: Creneau) => void;
   onClickCase: (date: string, heure: string) => void;
   onRejoindre: (c: Creneau) => void;
+  showDispos: boolean; dispos: DispoRow[]; dispoReferents: Referent[];
 }) {
   const jours      = Array.from({ length: 7 }, (_, i) => addDays(semaineDeb, i));
   const nbHeures   = HEURE_FIN - HEURE_DEBUT;
@@ -349,6 +390,31 @@ function VueSemaine({ semaineDeb, creneaux, referents, profile, onClickCreneau, 
                 <div key={`d${h}`} className="absolute w-full border-t border-dashed border-[#F8F7FA]" style={{ top: h * PX_PAR_HEURE + PX_PAR_HEURE / 2 }} />
               ))}
               {isToday && <TraitHeureActuelle />}
+              {showDispos && i < 5 && periodesPourJour(i + 1).map((p) => {
+                const sem     = semaineDeDate(j);
+                const jourSem = i + 1;
+                const refs = dispoReferents.filter((r) =>
+                  dispos.some((d) => d.referent_id === r.id && d.jour_semaine === jourSem && d.code === p.code && d.semaine === sem)
+                );
+                if (refs.length === 0) return null;
+                const dTop = ((heureEnMinutes(p.deb) - HEURE_DEBUT * 60) / 60) * PX_PAR_HEURE;
+                const dH   = ((heureEnMinutes(p.fin) - heureEnMinutes(p.deb)) / 60) * PX_PAR_HEURE;
+                return (
+                  <div key={`disp-${p.code}`} className="absolute flex gap-[1px] pointer-events-none"
+                    style={{ top: dTop + 1, height: Math.max(dH - 2, 8), left: 1, zIndex: 5 }}>
+                    {refs.map((r) => (
+                      <div key={r.id} onClick={(e) => e.stopPropagation()}
+                        className="group/disp relative h-full w-[5px] rounded-full pointer-events-auto cursor-default"
+                        style={{ backgroundColor: r.couleur, opacity: 0.9 }}>
+                        <span className="pointer-events-none absolute left-full top-1/2 z-30 ml-1 hidden -translate-y-1/2 whitespace-nowrap rounded-full border-2 bg-white px-2 py-0.5 text-[10px] font-semibold shadow-md group-hover/disp:block"
+                          style={{ color: r.couleur, borderColor: r.couleur }}>
+                          {r.prenom} {r.nom}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
               {blocs.map(({ creneau: c, col, nbCols }) => {
                 const debutMin = heureEnMinutes(c.heure_debut);
                 const dureeMin = dureeEnMinutes(c.heure_debut, c.heure_fin);
@@ -383,6 +449,7 @@ function VueMois({ moisRef, creneaux, referents, profile, onClickCreneau, onClic
   onClickCreneau: (c: Creneau) => void;
   onClickCase: (date: string, heure: string) => void;
   onRejoindre: (c: Creneau) => void;
+  showDispos?: boolean; dispos?: DispoRow[]; dispoReferents?: Referent[];
 }) {
   const premier    = startOfMonth(moisRef);
   const nbJours    = daysInMonth(moisRef);
@@ -1003,6 +1070,8 @@ export default function AgendaPage() {
 
   const [refVisibles, setRefVisibles] = useState<Set<string>>(new Set());
   const [showSansRef, setShowSansRef] = useState(true);
+  const [showDispos, setShowDispos]   = useState(false);
+  const [dispos, setDispos]           = useState<DispoRow[]>([]);
 
   const [modalCreneau, setModalCreneau]       = useState<Creneau | null | "new">(null);
   const [modalDateInit, setModalDateInit]     = useState(dateToISO(new Date()));
@@ -1092,6 +1161,11 @@ export default function AgendaPage() {
         setElevesMap(map);
       }
 
+      const { data: dispoData } = await supabase
+        .from("disponibilites")
+        .select("referent_id, jour_semaine, code, semaine");
+      if (dispoData) setDispos(dispoData as DispoRow[]);
+
       await loadCreneaux();
       setLoading(false);
     }
@@ -1113,6 +1187,9 @@ export default function AgendaPage() {
     if (idsImpliques.size === 0) return showSansRef;
     return Array.from(idsImpliques).some((id) => refVisibles.has(id));
   });
+
+  // Référents dont on superpose les disponibilités (mêmes filtres que l'agenda).
+  const dispoReferents = referents.filter((r) => refVisibles.has(r.id));
 
   function toggleRef(id: string) {
     setRefVisibles((prev) => {
@@ -1143,6 +1220,7 @@ export default function AgendaPage() {
 
   const semDeb = startOfWeek(dateRef);
   const semFin = addDays(semDeb, 6);
+  const semaineBadge = vue === "semaine" ? semaineDeDate(semDeb) : null;
   const titreNav = vue === "semaine"
     ? `${semDeb.getDate()} – ${semFin.getDate()} ${MOIS_LONGS[semFin.getMonth()]} ${semFin.getFullYear()}`
     : `${MOIS_LONGS[dateRef.getMonth()]} ${dateRef.getFullYear()}`;
@@ -1202,6 +1280,24 @@ export default function AgendaPage() {
           <span className="text-sm text-[#3A3556] flex-1">Sans référent</span>
           <span className="h-3 w-3 rounded-full shrink-0 bg-[#D1CFE2]" />
         </label>
+      </div>
+
+      <div className="mt-3 border-t border-[#F3F2FA] pt-3">
+        <label className="flex cursor-pointer items-center gap-2.5">
+          <div className="h-4 w-4 shrink-0 rounded border-2 transition flex items-center justify-center"
+            style={{ backgroundColor: showDispos ? "#6656B8" : "white", borderColor: showDispos ? "#6656B8" : "#D1CFE2" }}>
+            {showDispos && (
+              <svg viewBox="0 0 10 10" width="8" height="8" fill="none">
+                <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </div>
+          <input type="checkbox" className="sr-only" checked={showDispos} onChange={() => setShowDispos((v) => !v)} />
+          <span className="text-sm text-[#3A3556] flex-1">Afficher les disponibilités</span>
+        </label>
+        <p className="mt-1 pl-6 text-[10px] leading-snug text-[#9A97AD]">
+          Rubans colorés à gauche de chaque jour, selon l'alternance semaine A / B. Survolez un ruban pour voir le nom. Vue Semaine uniquement.
+        </p>
       </div>
     </div>
   );
@@ -1291,6 +1387,9 @@ export default function AgendaPage() {
     onClickCreneau: (c: Creneau) => setModalCreneau(c),
     onClickCase:    ouvrirCreation,
     onRejoindre:    handleRejoindre,
+    showDispos,
+    dispos,
+    dispoReferents,
   };
 
   return (
@@ -1341,7 +1440,12 @@ export default function AgendaPage() {
             <BasculeVue />
             <BoutonsNav />
           </div>
-          <p className="mt-2 text-sm font-medium text-[#1B1633]">{titreNav}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <p className="text-sm font-medium text-[#1B1633]">{titreNav}</p>
+            {semaineBadge && (
+              <span className="rounded-full bg-[#F5F3FF] px-2 py-0.5 text-xs font-semibold text-[#6656B8]">Semaine {semaineBadge}</span>
+            )}
+          </div>
         </header>
         <main className="flex-1 px-4 py-4 space-y-4 overflow-x-auto">
           <PanneauTaches />
@@ -1375,6 +1479,9 @@ export default function AgendaPage() {
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-3">
               <h2 className="text-xl font-semibold">{titreNav}</h2>
+              {semaineBadge && (
+                <span className="rounded-full bg-[#F5F3FF] px-2.5 py-0.5 text-xs font-semibold text-[#6656B8]">Semaine {semaineBadge}</span>
+              )}
               <BoutonsNav />
             </div>
             <BasculeVue />
