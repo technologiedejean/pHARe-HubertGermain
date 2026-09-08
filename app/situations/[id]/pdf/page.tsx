@@ -1,11 +1,13 @@
 // >>> NOUVEAU FICHIER : app/situations/[id]/pdf/page.tsx <<<
-// Vue "dossier imprimable" d'une situation : format A4, autant de pages
-// que nécessaire. Le PDF est produit par le navigateur (Imprimer →
-// « Enregistrer au format PDF »), ce qui préserve fidèlement le contenu
-// riche des comptes rendus (mise en forme, mentions, images collées).
+// Vue "dossier" d'une situation : format A4, autant de pages que nécessaire.
+// Deux sorties :
+//   - « Imprimer »        → boîte d'impression du navigateur (papier ou PDF)
+//   - « Enregistrer PDF » → téléchargement direct d'un fichier .pdf
+//                           (html2pdf.js : html2canvas + jsPDF, chargé à la demande)
+// Dépendance : npm install html2pdf.js  (+ fichier types/html2pdf.d.ts)
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -202,11 +204,6 @@ function BlocCR({ cr }: { cr: CompteRendu }) {
 export default function SituationPdfPage() {
   const params       = useParams<{ id: string }>();
   const router       = useRouter();
-  // Lu côté client (évite l'obligation de Suspense liée à useSearchParams)
-  const [autoPrint, setAutoPrint] = useState(false);
-  useEffect(() => {
-    setAutoPrint(new URLSearchParams(window.location.search).get("print") === "1");
-  }, []);
 
   const [situation, setSituation] = useState<Situation | null>(null);
   const [creneaux, setCreneaux]   = useState<Creneau[]>([]);
@@ -214,6 +211,9 @@ export default function SituationPdfPage() {
   const [droits, setDroits]       = useState<Droit[]>([]);
   const [error, setError]         = useState<string | null>(null);
   const [loading, setLoading]     = useState(true);
+  const [exportEnCours, setExportEnCours] = useState(false);
+  const [exportErreur, setExportErreur]   = useState<string | null>(null);
+  const docRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -283,19 +283,34 @@ export default function SituationPdfPage() {
     return () => { document.title = ancien; };
   }, [situation]);
 
-  // Impression automatique (ouverture depuis le bouton PDF de la liste)
-  useEffect(() => {
-    if (!autoPrint || loading || !situation) return;
-    const imgs = Array.from(document.images);
-    const attente = imgs.filter((i) => !i.complete).map(
-      (i) => new Promise<void>((res) => { i.onload = () => res(); i.onerror = () => res(); })
-    );
-    let annule = false;
-    Promise.all(attente).then(() => {
-      if (!annule) setTimeout(() => window.print(), 300);
-    });
-    return () => { annule = true; };
-  }, [autoPrint, loading, situation]);
+  /* ── Enregistrement direct en PDF ─────────────────────────── */
+  async function enregistrerPdf() {
+    if (!docRef.current || !situation || exportEnCours) return;
+    setExportEnCours(true); setExportErreur(null);
+    try {
+      const html2pdf = (await import("html2pdf.js")).default;
+      const base = (situation.reference ?? situation.titre)
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+        .slice(0, 60) || "situation";
+      await html2pdf()
+        .set({
+          filename:    `pHARe-${base}.pdf`,
+          margin:      [16, 14, 18, 14],              // mm : haut, droite, bas, gauche
+          image:       { type: "jpeg", quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false },
+          jsPDF:       { unit: "mm", format: "a4", orientation: "portrait" },
+          pagebreak:   { mode: ["css", "legacy"], avoid: [".avoid-break", "img", "tr"] },
+        })
+        .from(docRef.current)
+        .save();
+    } catch (e: any) {
+      console.error(e);
+      setExportErreur("L'enregistrement du PDF a échoué. Utilisez « Imprimer » puis « Enregistrer au format PDF ».");
+    } finally {
+      setExportEnCours(false);
+    }
+  }
 
   /* ── États d'attente ──────────────────────────────────────── */
   if (loading) {
@@ -339,27 +354,36 @@ export default function SituationPdfPage() {
       <div className="no-print sticky top-0 z-10 border-b border-[#D1CFE2] bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-[210mm] flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">Dossier imprimable</p>
-            <p className="text-xs text-[#6C6A80]">
-              Cliquez sur « Imprimer », puis choisissez « Enregistrer au format PDF » comme destination.
-            </p>
+            <button onClick={() => router.push("/situations")}
+              className="text-xs text-[#6656B8] hover:underline">← Situations</button>
+            <p className="truncate text-sm font-semibold">Dossier de la situation</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => router.push(`/situations/${situation.id}`)}
               className="rounded-xl border border-[#E7E6EF] bg-white px-3 py-2 text-sm text-[#3A3556] hover:bg-[#F3F2FA] transition">
               Voir la situation
             </button>
             <button onClick={() => window.print()}
-              className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm font-medium text-white hover:bg-[#2A1E5C] transition">
-              🖨️ Imprimer / PDF
+              className="rounded-xl border border-[#1A1440] bg-white px-4 py-2 text-sm font-medium text-[#1A1440] hover:bg-[#F5F3FF] transition">
+              🖨️ Imprimer
+            </button>
+            <button onClick={enregistrerPdf} disabled={exportEnCours}
+              className="rounded-xl bg-[#1A1440] px-4 py-2 text-sm font-medium text-white hover:bg-[#2A1E5C] transition disabled:opacity-60">
+              {exportEnCours ? "Génération…" : "⬇️ Enregistrer le PDF"}
             </button>
           </div>
         </div>
+        {exportErreur && (
+          <div className="mx-auto max-w-[210mm] px-4 pb-3">
+            <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{exportErreur}</p>
+          </div>
+        )}
       </div>
 
       {/* ── Document A4 ───────────────────────────────────────── */}
       <div className="py-6 print:py-0">
         <div className="a4 shadow-xl">
+         <div ref={docRef}>
 
           {/* En-tête */}
           <div className="flex items-start justify-between gap-6 border-b-4 border-[#1A1440] pb-4">
@@ -525,6 +549,7 @@ export default function SituationPdfPage() {
             pHARe — Programme de lutte contre le harcèlement à l'école · Collège Hubert Germain ·
             {situation.reference ? ` ${situation.reference} · ` : " "}édité le {fmtDate(new Date().toISOString())}
           </div>
+         </div>
         </div>
       </div>
     </div>

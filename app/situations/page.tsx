@@ -77,19 +77,18 @@ function StatutBadge({ statut }: { statut: StatutSituation }) {
 }
 
 /* ============================================================
-   Bouton PDF — ouvre le dossier imprimable dans un nouvel onglet
-   (page /situations/[id]/pdf, impression lancée automatiquement)
+   Bouton PDF — mène à la page « dossier » de la situation
+   (/situations/[id]/pdf), d'où l'on peut imprimer ou enregistrer le PDF
    ============================================================ */
-function BoutonPdf({ situationId, compact = false }: { situationId: string; compact?: boolean }) {
+function BoutonPdf({ situationId, compact = false, onOpen }: {
+  situationId: string; compact?: boolean; onOpen: (id: string) => void;
+}) {
   return (
     <button
       type="button"
-      title="Générer le dossier PDF"
-      aria-label="Générer le dossier PDF"
-      onClick={(e) => {
-        e.stopPropagation();
-        window.open(`/situations/${situationId}/pdf?print=1`, "_blank", "noopener");
-      }}
+      title="Dossier PDF de la situation"
+      aria-label="Dossier PDF de la situation"
+      onClick={(e) => { e.stopPropagation(); onOpen(situationId); }}
       className={`inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#E7E6EF] bg-white
                   text-[#6656B8] transition hover:border-[#7C6BD6] hover:bg-[#F5F3FF]
                   focus:outline-none focus:ring-2 focus:ring-[#7C6BD6]/30
@@ -865,7 +864,7 @@ export default function SituationsPage() {
         </p>
       </td>
       <td className="px-3 py-4 text-right">
-        <BoutonPdf situationId={s.id} />
+        <BoutonPdf situationId={s.id} onOpen={(id) => router.push(`/situations/${id}/pdf`)} />
       </td>
     </tr>
   );
@@ -899,7 +898,7 @@ export default function SituationsPage() {
           )}
           {s.gravite && <span>⚠️ Niveau {s.gravite}</span>}
         </div>
-        <BoutonPdf situationId={s.id} compact />
+        <BoutonPdf situationId={s.id} compact onOpen={(id) => router.push(`/situations/${id}/pdf`)} />
       </div>
     </div>
   );
