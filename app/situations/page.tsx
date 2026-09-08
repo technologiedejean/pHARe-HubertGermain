@@ -77,6 +77,35 @@ function StatutBadge({ statut }: { statut: StatutSituation }) {
 }
 
 /* ============================================================
+   Bouton PDF — ouvre le dossier imprimable dans un nouvel onglet
+   (page /situations/[id]/pdf, impression lancée automatiquement)
+   ============================================================ */
+function BoutonPdf({ situationId, compact = false }: { situationId: string; compact?: boolean }) {
+  return (
+    <button
+      type="button"
+      title="Générer le dossier PDF"
+      aria-label="Générer le dossier PDF"
+      onClick={(e) => {
+        e.stopPropagation();
+        window.open(`/situations/${situationId}/pdf?print=1`, "_blank", "noopener");
+      }}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-lg border border-[#E7E6EF] bg-white
+                  text-[#6656B8] transition hover:border-[#7C6BD6] hover:bg-[#F5F3FF]
+                  focus:outline-none focus:ring-2 focus:ring-[#7C6BD6]/30
+                  ${compact ? "h-8 w-8 justify-center" : "px-2.5 py-1.5 text-xs font-medium"}`}>
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8"
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <path d="M14 2v6h6" />
+        <path d="M9 13h6M9 17h6" />
+      </svg>
+      {!compact && <span>PDF</span>}
+    </button>
+  );
+}
+
+/* ============================================================
    Nom affiché d'un acteur
    ============================================================ */
 function nomActeur(a: ActeurSituation): string {
@@ -835,6 +864,9 @@ export default function SituationsPage() {
           {s.createur ? `${s.createur.prenom} ${s.createur.nom}` : "—"}
         </p>
       </td>
+      <td className="px-3 py-4 text-right">
+        <BoutonPdf situationId={s.id} />
+      </td>
     </tr>
   );
 
@@ -854,17 +886,20 @@ export default function SituationsPage() {
         </div>
         <StatutBadge statut={s.statut} />
       </div>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#6C6A80]">
-        {s.victimes.length > 0 && (
-          <span>🔴 {s.victimes.map(nomActeur).join(", ")}</span>
-        )}
-        {s.intimidateurs.length > 0 && (
-          <span>🟠 {s.intimidateurs.map(nomActeur).join(", ")}</span>
-        )}
-        {s.date_signalement && (
-          <span>📅 {new Date(s.date_signalement).toLocaleDateString("fr-FR")}</span>
-        )}
-        {s.gravite && <span>⚠️ Niveau {s.gravite}</span>}
+      <div className="flex items-end justify-between gap-3">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[#6C6A80]">
+          {s.victimes.length > 0 && (
+            <span>🔴 {s.victimes.map(nomActeur).join(", ")}</span>
+          )}
+          {s.intimidateurs.length > 0 && (
+            <span>🟠 {s.intimidateurs.map(nomActeur).join(", ")}</span>
+          )}
+          {s.date_signalement && (
+            <span>📅 {new Date(s.date_signalement).toLocaleDateString("fr-FR")}</span>
+          )}
+          {s.gravite && <span>⚠️ Niveau {s.gravite}</span>}
+        </div>
+        <BoutonPdf situationId={s.id} compact />
       </div>
     </div>
   );
@@ -984,11 +1019,14 @@ export default function SituationsPage() {
                     {h}
                   </th>
                 ))}
+                <th className="px-3 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-[#9A97AD]">
+                  Export
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#F3F2FA]">
               {filtered.length === 0
-                ? <tr><td colSpan={6} className="px-5 py-12 text-center text-[#9A97AD]">
+                ? <tr><td colSpan={7} className="px-5 py-12 text-center text-[#9A97AD]">
                     Aucune situation ne correspond à votre recherche.
                   </td></tr>
                 : filtered.map((s) => <LigneTableau key={s.id} s={s} />)
