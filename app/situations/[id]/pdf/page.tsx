@@ -140,6 +140,7 @@ const PRINT_STYLES = `
 
   /* Contenu riche des comptes rendus (issu de l'éditeur) */
   .cr-html { font-size: 10.5pt; line-height: 1.55; color: #1B1633; word-break: break-word; }
+  .cr-html p, .cr-html li, .cr-html blockquote { break-inside: avoid; page-break-inside: avoid; }
   .cr-html p { margin: 0 0 0.4em 0; }
   .cr-html ul, .cr-html ol { margin: 0.2em 0 0.5em 1.4em; }
   .cr-html ul { list-style: disc; } .cr-html ol { list-style: decimal; }
@@ -164,7 +165,7 @@ const PRINT_STYLES = `
    ============================================================ */
 function Titre2({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mt-8 mb-3 border-b-2 border-[#1A1440] pb-1 text-[13pt] font-semibold uppercase tracking-wide text-[#1A1440]">
+    <h2 className="avoid-break mt-8 mb-3 border-b-2 border-[#1A1440] pb-1 text-[13pt] font-semibold uppercase tracking-wide text-[#1A1440]">
       {children}
     </h2>
   );
@@ -172,7 +173,7 @@ function Titre2({ children }: { children: React.ReactNode }) {
 
 function Ligne({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex gap-3 py-1 text-[10.5pt]">
+    <div className="avoid-break flex gap-3 py-1 text-[10.5pt]">
       <span className="w-[42mm] shrink-0 text-[#6C6A80]">{label}</span>
       <span className="flex-1 text-[#1B1633]">{children}</span>
     </div>
@@ -386,7 +387,7 @@ export default function SituationPdfPage() {
          <div ref={docRef}>
 
           {/* En-tête */}
-          <div className="flex items-start justify-between gap-6 border-b-4 border-[#1A1440] pb-4">
+          <div className="avoid-break flex items-start justify-between gap-6 border-b-4 border-[#1A1440] pb-4">
             <div className="min-w-0">
               <p className="text-[9pt] font-semibold uppercase tracking-[0.2em] text-[#6656B8]">
                 pHARe · Collège Hubert Germain
@@ -402,7 +403,7 @@ export default function SituationPdfPage() {
             </div>
           </div>
 
-          <p className="mt-2 text-[8.5pt] italic text-[#9A97AD]">
+          <p className="avoid-break mt-2 text-[8.5pt] italic text-[#9A97AD]">
             Document confidentiel — données à caractère personnel relatives à des mineurs. Ne pas diffuser en dehors de l'équipe pHARe.
           </p>
 
@@ -445,7 +446,7 @@ export default function SituationPdfPage() {
           {/* 4. Description */}
           <Titre2>4. Description et contexte</Titre2>
           {situation.description
-            ? <p className="whitespace-pre-wrap text-[10.5pt] leading-relaxed">{situation.description}</p>
+            ? <p className="avoid-break whitespace-pre-wrap text-[10.5pt] leading-relaxed">{situation.description}</p>
             : <p className="text-[10.5pt] text-[#B4B1C4]">Aucune description saisie.</p>}
 
           {/* 5. Entretiens */}
@@ -475,7 +476,7 @@ export default function SituationPdfPage() {
                   </div>
                 </div>
                 {crsDuCreneau.length === 0
-                  ? <p className="mt-2 pl-3 text-[9.5pt] italic text-[#9A97AD]">Aucun compte rendu rédigé pour cet entretien.</p>
+                  ? <p className="avoid-break mt-2 pl-3 text-[9.5pt] italic text-[#9A97AD]">Aucun compte rendu rédigé pour cet entretien.</p>
                   : crsDuCreneau.map((cr) => <BlocCR key={cr.id} cr={cr} />)}
               </div>
             );
@@ -483,7 +484,7 @@ export default function SituationPdfPage() {
 
           {crsOrphelins.length > 0 && (
             <div className="mt-6">
-              <h3 className="text-[11pt] font-semibold text-[#1A1440]">Comptes rendus non rattachés à un créneau</h3>
+              <h3 className="avoid-break text-[11pt] font-semibold text-[#1A1440]">Comptes rendus non rattachés à un créneau</h3>
               {crsOrphelins.map((cr) => <BlocCR key={cr.id} cr={cr} />)}
             </div>
           )}
@@ -545,7 +546,7 @@ export default function SituationPdfPage() {
           </div>
 
           {/* Pied de page */}
-          <div className="mt-10 border-t border-[#D1CFE2] pt-2 text-[8.5pt] text-[#9A97AD]">
+          <div className="avoid-break mt-10 border-t border-[#D1CFE2] pt-2 text-[8.5pt] text-[#9A97AD]">
             pHARe — Programme de lutte contre le harcèlement à l'école · Collège Hubert Germain ·
             {situation.reference ? ` ${situation.reference} · ` : " "}édité le {fmtDate(new Date().toISOString())}
           </div>
