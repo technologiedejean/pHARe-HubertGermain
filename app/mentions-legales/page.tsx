@@ -7,13 +7,13 @@ import Link from "next/link";
    ============================================================ */
 const ETABLISSEMENT = {
   nom: "Collège Hubert Germain",
-  adresse: "[Adresse complète de l'établissement]",
-  email: "[ce.xxxxxxx@ac-creteil.fr]",
-  telephone: "[01 00 00 00 00]",
-  chefEtablissement: "[Nom du chef d'établissement]",
-  dpoEmail: "[dpd@ac-creteil.fr]",
-  academie: "académie de Créteil",
-  referentApp: "[Nom du référent pHARe / administrateur]",
+  adresse: "[12 rue du vieux Châtre, 91580 Souzy la Briche]",
+  email: "ce.0911256W@ac-versailles.fr",
+  telephone: "01 64 56 65 45",
+  chefEtablissement: "Didier Gence",
+  dpoEmail: "[dpd@ac-versailles.fr]",
+  academie: "académie de Versailles",
+  referentApp: "William Dejean",
 };
 const DATE_MISE_A_JOUR = "septembre 2026";
 
