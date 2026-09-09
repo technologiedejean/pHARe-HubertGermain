@@ -68,11 +68,6 @@ type CompteRendu = {
   auteur: Personne | null;
 };
 
-type Droit = {
-  niveau: "lecture" | "completion" | "modification";
-  referent: Personne | null;
-};
-
 /* ============================================================
    Constantes & utilitaires
    ============================================================ */
@@ -89,12 +84,6 @@ const ROLE_LABELS: Record<RoleActeur, string> = {
   intimidateur:   "Intimidateur(s)",
   temoin:         "Témoin(s)",
   lanceur_alerte: "Lanceur(s) d'alerte",
-};
-
-const NIVEAU_LABELS: Record<Droit["niveau"], string> = {
-  lecture:      "Lecture",
-  completion:   "Complétion",
-  modification: "Modification",
 };
 
 const PREFIXE_NOTE = "[NOTE]";
@@ -209,7 +198,6 @@ export default function SituationPdfPage() {
   const [situation, setSituation] = useState<Situation | null>(null);
   const [creneaux, setCreneaux]   = useState<Creneau[]>([]);
   const [crs, setCrs]             = useState<CompteRendu[]>([]);
-  const [droits, setDroits]       = useState<Droit[]>([]);
   const [error, setError]         = useState<string | null>(null);
   const [loading, setLoading]     = useState(true);
   const [exportEnCours, setExportEnCours] = useState(false);
@@ -222,7 +210,7 @@ export default function SituationPdfPage() {
       if (!user) { router.push("/login"); return; }
       const id = params.id;
 
-      const [sitRes, crenRes, crRes, droitsRes] = await Promise.all([
+      const [sitRes, crenRes, crRes] = await Promise.all([
         supabase
           .from("situations")
           .select(`
@@ -255,10 +243,6 @@ export default function SituationPdfPage() {
           `)
           .eq("situation_id", id)
           .order("created_at", { ascending: true }),
-        supabase
-          .from("referent_situation_droits")
-          .select(`niveau, referent:profiles!referent_situation_droits_referent_id_fkey ( nom, prenom )`)
-          .eq("situation_id", id),
       ]);
 
       if (sitRes.error || !sitRes.data) {
@@ -270,7 +254,6 @@ export default function SituationPdfPage() {
       setSituation(sitRes.data as unknown as Situation);
       setCreneaux((crenRes.data ?? []) as unknown as Creneau[]);
       setCrs((crRes.data ?? []) as unknown as CompteRendu[]);
-      setDroits((droitsRes.data ?? []) as unknown as Droit[]);
       setLoading(false);
     }
     load();
@@ -346,6 +329,23 @@ export default function SituationPdfPage() {
     .sort((a, b) => (a.date_entretien ?? a.created_at).localeCompare(b.date_entretien ?? b.created_at));
 
   const nbCr = crsEntretien.length;
+
+  // Référents intervenus : ceux qui ont mené un entretien (référent en charge,
+  // sinon référent du créneau) et/ou rédigé un compte rendu ou une note.
+  const intervenants = new Map<string, { nom: Personne; entretiens: number; crs: number; notes: number }>();
+  const cle = (p: Personne) => `${p.nom}|${p.prenom}`;
+  const ajouter = (p: Personne | null, champ: "entretiens" | "crs" | "notes") => {
+    if (!p) return;
+    const k = cle(p);
+    const cur = intervenants.get(k) ?? { nom: p, entretiens: 0, crs: 0, notes: 0 };
+    cur[champ] += 1;
+    intervenants.set(k, cur);
+  };
+  for (const c of entretiens) ajouter(c.referent_charge ?? c.referent, "entretiens");
+  for (const cr of crsEntretien) ajouter(cr.auteur, "crs");
+  for (const n of notes) ajouter(n.auteur, "notes");
+  const listeIntervenants = Array.from(intervenants.values())
+    .sort((a, b) => b.entretiens - a.entretiens || b.crs - a.crs || a.nom.nom.localeCompare(b.nom.nom));
 
   return (
     <div className="min-h-screen bg-[#E9E8F1] text-[#1B1633]">
@@ -517,32 +517,36 @@ export default function SituationPdfPage() {
                 </div>
               ))}
 
-          {/* 7. Accès */}
-          <Titre2>7. Référents ayant accès au dossier</Titre2>
+          {/* 7. Référents intervenus */}
+          <Titre2>7. Référents intervenus sur le dossier</Titre2>
           <div className="avoid-break">
-            {droits.length === 0
-              ? <p className="text-[10.5pt] text-[#B4B1C4]">Aucun droit enregistré.</p>
+            {listeIntervenants.length === 0
+              ? <p className="text-[10.5pt] text-[#B4B1C4]">Aucun entretien ni compte rendu enregistré pour l'instant.</p>
               : (
                 <table className="w-full text-[10pt]">
                   <thead>
                     <tr className="border-b border-[#D1CFE2] text-left text-[#6C6A80]">
                       <th className="py-1 font-medium">Référent</th>
-                      <th className="py-1 font-medium">Niveau</th>
+                      <th className="py-1 text-right font-medium">Entretiens menés</th>
+                      <th className="py-1 text-right font-medium">Comptes rendus</th>
+                      <th className="py-1 text-right font-medium">Notes</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {droits
-                      .slice()
-                      .sort((a, b) => (a.referent?.nom ?? "").localeCompare(b.referent?.nom ?? ""))
-                      .map((d, i) => (
-                        <tr key={i} className="border-b border-[#F3F2FA]">
-                          <td className="py-1">{nomPersonne(d.referent)}</td>
-                          <td className="py-1">{NIVEAU_LABELS[d.niveau]}</td>
-                        </tr>
-                      ))}
+                    {listeIntervenants.map((r) => (
+                      <tr key={cle(r.nom)} className="border-b border-[#F3F2FA]">
+                        <td className="py-1 font-medium text-[#1A1440]">{nomPersonne(r.nom)}</td>
+                        <td className="py-1 text-right">{r.entretiens || "—"}</td>
+                        <td className="py-1 text-right">{r.crs || "—"}</td>
+                        <td className="py-1 text-right">{r.notes || "—"}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               )}
+            <p className="mt-1 text-[8.5pt] text-[#9A97AD]">
+              Situation créée par {nomPersonne(situation.createur)}.
+            </p>
           </div>
 
           {/* Pied de page */}
