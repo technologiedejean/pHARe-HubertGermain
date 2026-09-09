@@ -333,6 +333,16 @@ export default function LoginPage() {
             <br />
             Informations strictement confidentielles.
           </p>
+
+          {/* Mentions légales */}
+          <p className="mt-3 text-center text-[11px]">
+            <a
+              href="/mentions-legales"
+              className="text-white/45 underline underline-offset-2 transition hover:text-[#F3C77B]"
+            >
+              Mentions légales &amp; données personnelles
+            </a>
+          </p>
         </div>
       </div>
 
@@ -389,6 +399,16 @@ export default function LoginPage() {
             <p className="mt-8 text-xs leading-relaxed text-[#9A97AD]">
               Accès réservé aux personnels habilités du dispositif. Les informations
               consultées ici sont strictement confidentielles.
+            </p>
+
+            {/* Mentions légales */}
+            <p className="mt-3 text-xs">
+              <a
+                href="/mentions-legales"
+                className="text-[#9A97AD] underline underline-offset-2 transition hover:text-[#6656B8]"
+              >
+                Mentions légales &amp; données personnelles
+              </a>
             </p>
           </div>
         </section>
