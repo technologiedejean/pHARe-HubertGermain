@@ -528,6 +528,14 @@ export default function DashboardPage() {
                   <span>🚪</span> Se déconnecter
                 </button>
               </li>
+              {/* Mentions légales */}
+              <li className="mt-2 border-t border-[#EEEDF5] pt-2">
+                <a href="/mentions-legales"
+                  className="block px-4 py-2 text-xs text-[#9A97AD] hover:text-[#6656B8]"
+                  onClick={() => setMenuOpen(false)}>
+                  Mentions légales &amp; données personnelles
+                </a>
+              </li>
             </ul>
           </nav>
         )}
@@ -598,6 +606,11 @@ export default function DashboardPage() {
                          font-medium text-red-600 hover:bg-red-50 transition-colors">
               <span>🚪</span> Se déconnecter
             </button>
+            {/* Mentions légales */}
+            <a href="/mentions-legales"
+              className="mt-3 block px-4 text-center text-xs text-[#9A97AD] hover:text-[#6656B8]">
+              Mentions légales &amp; données personnelles
+            </a>
           </div>
         </aside>
 
