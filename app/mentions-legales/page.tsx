@@ -7,7 +7,7 @@ import Link from "next/link";
    ============================================================ */
 const ETABLISSEMENT = {
   nom: "Collège Hubert Germain",
-  adresse: "[12 rue du vieux Châtre, 91580 Souzy la Briche]",
+  adresse: "12 rue du vieux Châtre, 91580 Souzy la Briche",
   email: "ce.0911256W@ac-versailles.fr",
   telephone: "01 64 56 65 45",
   chefEtablissement: "Didier Gence",
