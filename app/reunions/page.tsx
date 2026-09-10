@@ -39,6 +39,17 @@ function tousLesParticipants(r: Reunion): Referent[] {
   return liste.filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
 }
 
+// Le statut affiché est calculé à partir de la date et de l'heure de fin,
+// et non du champ "statut" stocké en base (qui n'est jamais mis à jour).
+// Construit en heure locale (année, mois, jour, h, min) pour éviter le
+// décalage UTC des chaînes ISO.
+function estPassee(r: Reunion, maintenant: Date): boolean {
+  const [y, m, d] = r.date_creneau.split("-").map(Number);
+  const [hh, mm] = r.heure_fin.slice(0, 5).split(":").map(Number);
+  const fin = new Date(y, m - 1, d, hh, mm, 0, 0);
+  return fin.getTime() < maintenant.getTime();
+}
+
 /* ============================================================
    Composants de base
    ============================================================ */
@@ -51,28 +62,32 @@ function Avatar({ r }: { r: Referent }) {
   );
 }
 
-function BadgeStatut({ statut, aCr, nonLu }: { statut: Reunion["statut"]; aCr?: boolean; nonLu?: boolean }) {
-  if (statut === "prevu") return (
+function BadgeStatut({ passee, aCr, nonLu }: { passee: boolean; aCr?: boolean; nonLu?: boolean }) {
+  if (!passee) return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
       <span className="h-1.5 w-1.5 rounded-full bg-blue-500" /> Prévue
     </span>
   );
-  if (statut === "realise") {
-    return aCr ? (
-      <span className="relative inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> CR rédigé
-        {nonLu && (
-          <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"
-            title="Vous n'avez pas encore ouvert ce compte rendu" />
-        )}
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F3F2FA] px-2.5 py-0.5 text-xs font-medium text-[#6C6A80]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#B4B1C4]" /> Passée
       </span>
-    ) : (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
-        <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> CR manquant
-      </span>
-    );
-  }
-  return null;
+      {aCr ? (
+        <span className="relative inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> CR rédigé
+          {nonLu && (
+            <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"
+              title="Vous n'avez pas encore ouvert ce compte rendu" />
+          )}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-700">
+          <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> CR manquant
+        </span>
+      )}
+    </span>
+  );
 }
 
 /* ============================================================
@@ -85,11 +100,16 @@ export default function ReunionsPage() {
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
   const [crManquantOnly, setCrManquantOnly] = useState(false);
+  const [maintenant, setMaintenant] = useState<Date>(() => new Date());
+
+  // Rafraîchit "maintenant" chaque minute pour que "Prévue" bascule
+  // en "Passée" sans recharger la page.
+  useEffect(() => {
+    const t = setInterval(() => setMaintenant(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const load = useCallback(async () => {
-    // On récupère l'utilisateur connecté directement ici (plutôt que de
-    // dépendre de l'état "profile", qui pourrait encore être null au premier
-    // appel de cette fonction mémoïsée).
     const { data: { user } } = await supabase.auth.getUser();
 
     const [reuRes, crsRes] = await Promise.all([
@@ -158,9 +178,11 @@ export default function ReunionsPage() {
   const filtered = reunions.filter((r) => {
     const q = search.toLowerCase();
     const matchSearch = !q || (r.titre ?? "").toLowerCase().includes(q);
-    const matchCr = !crManquantOnly || (r.statut === "realise" && !r.a_cr);
+    const matchCr = !crManquantOnly || (estPassee(r, maintenant) && !r.a_cr);
     return matchSearch && matchCr;
   });
+
+  const nbCrManquants = reunions.filter((r) => estPassee(r, maintenant) && !r.a_cr).length;
 
   if (loading || !profile) {
     return (
@@ -183,7 +205,9 @@ export default function ReunionsPage() {
               {formatDateCourt(r.date_creneau)} · {r.heure_debut.slice(0, 5)}–{r.heure_fin.slice(0, 5)}
             </p>
           </div>
-          <BadgeStatut statut={r.statut} aCr={r.a_cr} nonLu={r.cr_non_lu} />
+        </div>
+        <div className="mb-2">
+          <BadgeStatut passee={estPassee(r, maintenant)} aCr={r.a_cr} nonLu={r.cr_non_lu} />
         </div>
         {participants.length > 0 && (
           <div className="flex items-center gap-1.5 mt-2">
@@ -223,7 +247,9 @@ export default function ReunionsPage() {
             </div>
           )}
         </td>
-        <td className="px-5 py-4"><BadgeStatut statut={r.statut} aCr={r.a_cr} nonLu={r.cr_non_lu} /></td>
+        <td className="px-5 py-4 whitespace-nowrap">
+          <BadgeStatut passee={estPassee(r, maintenant)} aCr={r.a_cr} nonLu={r.cr_non_lu} />
+        </td>
       </tr>
     );
   };
@@ -248,7 +274,7 @@ export default function ReunionsPage() {
           <label className="mt-2 flex items-center gap-2 text-xs text-[#6C6A80]">
             <input type="checkbox" checked={crManquantOnly} onChange={(e) => setCrManquantOnly(e.target.checked)}
               className="rounded border-[#D1CFE2]" />
-            CR manquant uniquement
+            CR manquant uniquement{nbCrManquants > 0 && ` (${nbCrManquants})`}
           </label>
         </header>
         <main className="flex-1 px-5 py-5 space-y-3">
@@ -287,6 +313,9 @@ export default function ReunionsPage() {
             <input type="checkbox" checked={crManquantOnly} onChange={(e) => setCrManquantOnly(e.target.checked)}
               className="rounded border-[#D1CFE2]" />
             CR manquant uniquement
+            {nbCrManquants > 0 && (
+              <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">{nbCrManquants}</span>
+            )}
           </label>
         </div>
 
